@@ -1,0 +1,49 @@
+// Copyright 2025 The Casdoor Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+async function request(path, options) {
+  const resp = await fetch(path, {
+    headers: {"Content-Type": "application/json"},
+    ...options,
+  });
+  const body = await resp.json();
+  if (body.status !== "ok") {
+    throw new Error(body.msg || "request failed");
+  }
+  return body.data;
+}
+
+export function getEvents(limit = 200) {
+  return request(`/api/events?limit=${limit}`);
+}
+
+export function getPolicy() {
+  return request("/api/policy");
+}
+
+export function updatePolicy(policy) {
+  return request("/api/policy", {method: "POST", body: JSON.stringify(policy)});
+}
+
+export function getSettings() {
+  return request("/api/settings");
+}
+
+export function updateSettings(settings) {
+  return request("/api/settings", {method: "POST", body: JSON.stringify(settings)});
+}
+
+export function caCertDownloadUrl() {
+  return "/api/ca-cert";
+}

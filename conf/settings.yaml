@@ -1,0 +1,11 @@
+casdoor:
+    endpoint: http://localhost:8000
+    clientId: ""
+    clientSecret: ""
+    organization: built-in
+    application: app-built-in
+intercept:
+    proxyPort: 9090
+    failClosedOnPdpError: true
+    passthroughUnrecognized: true
+    stepUpDefaultAction: deny

@@ -28,5 +28,16 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+*.iml
+.vscode/
+
+.claude
+
+tmp/
+tmpFiles/
+*.tmp
+logs/
+lastupdate.tmp
+commentsRouter*.go
+

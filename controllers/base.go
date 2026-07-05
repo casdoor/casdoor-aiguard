@@ -1,0 +1,48 @@
+// Copyright 2025 The Casdoor Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package controllers holds aiguard's own management API - the Web UI's
+// event stream, policy editor and settings pages talk to these endpoints.
+// It never talks to the intercepted agents; that's proxy's job.
+package controllers
+
+import (
+	"github.com/beego/beego/v2/server/web"
+)
+
+// ApiController is the base controller for handlers under /api.
+type ApiController struct {
+	web.Controller
+}
+
+// Response is the envelope every /api endpoint replies with, mirroring Casdoor's.
+type Response struct {
+	Status string      `json:"status"`
+	Msg    string      `json:"msg"`
+	Data   interface{} `json:"data"`
+}
+
+func (c *ApiController) ResponseOk(data ...interface{}) {
+	resp := &Response{Status: "ok"}
+	if len(data) > 0 {
+		resp.Data = data[0]
+	}
+	c.Data["json"] = resp
+	c.ServeJSON()
+}
+
+func (c *ApiController) ResponseError(errorMsg string) {
+	c.Data["json"] = &Response{Status: "error", Msg: errorMsg}
+	c.ServeJSON()
+}

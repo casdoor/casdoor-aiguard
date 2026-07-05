@@ -1,0 +1,44 @@
+{
+  "name": "aiguard-web",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@ant-design/icons": "^6.1.1",
+    "@craco/craco": "^6.4.5",
+    "antd": "6.3.5",
+    "craco-less": "^2.0.0",
+    "i18next": "^19.8.9",
+    "react": "^18.2.0",
+    "react-app-polyfill": "^3.0.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^11.8.7",
+    "react-router-dom": "^5.3.3",
+    "react-scripts": "5.0.1"
+  },
+  "scripts": {
+    "start": "cross-env PORT=7002 craco start",
+    "build": "cross-env GENERATE_SOURCEMAP=false craco build",
+    "test": "craco test",
+    "eject": "craco eject"
+  },
+  "eslintConfig": {
+    "extends": "react-app"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all",
+      "ie > 8"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version",
+      "ie > 8"
+    ]
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  }
+}

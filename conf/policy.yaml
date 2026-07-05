@@ -1,0 +1,12 @@
+enabledRecognizers:
+    - mcp
+    - payment-example
+rules:
+    - id: high-value-payment-step-up
+      category: payment
+      minAmount: 1000
+      action: step-up
+    - id: payment-needs-pdp
+      category: payment
+      action: pdp
+defaultAction: pdp
