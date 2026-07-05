@@ -47,7 +47,7 @@ func NewEngine(ca *CertificateAuthority) *Engine {
 	}
 }
 
-// Start listens on conf.GetProxyPort() and serves forever. Call it in a
+// Start listens on the configured proxy port and serves forever. Call it in a
 // goroutine; it does not return unless the listener fails.
 func (e *Engine) Start() error {
 	port := object.GetSettings().Intercept.ProxyPort
@@ -55,13 +55,18 @@ func (e *Engine) Start() error {
 	if err != nil {
 		return fmt.Errorf("proxy: failed to listen on port %d: %w", port, err)
 	}
-	logs.Info("aiguard transparent proxy listening on :%d", port)
+	logs.Info("aiguard proxy listening on :%d (transparent redirect + explicit-proxy)", port)
+	return e.Serve(ln)
+}
 
+// Serve accepts and handles connections on ln until it errors. It is factored
+// out of Start so tests can drive the full pipeline over an ephemeral port.
+func (e *Engine) Serve(ln net.Listener) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			logs.Warn("proxy: accept error: %v", err)
-			continue
+			return err
 		}
 		go e.handleConnection(conn)
 	}
@@ -70,32 +75,32 @@ func (e *Engine) Start() error {
 func (e *Engine) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		logs.Warn("proxy: non-TCP connection, dropping")
-		return
-	}
-
-	origDst, err := getOriginalDestination(tcpConn)
-	if err != nil {
-		logs.Warn("proxy: could not determine original destination (is this connection reaching aiguard via an iptables/nftables REDIRECT? see scripts/): %v", err)
-		return
-	}
-
-	pid, procName := LookupSourceProcess(tcpConn.RemoteAddr())
+	pid, procName := LookupSourceProcess(conn.RemoteAddr())
 	meta := SourceMeta{Pid: pid, ProcessName: procName}
 
 	br := bufio.NewReader(conn)
-	firstByte, err := br.Peek(1)
-	if err != nil {
-		return
+
+	// Prefer the transparent path: if this connection arrived via an
+	// iptables/nftables REDIRECT, SO_ORIGINAL_DST tells us where the agent
+	// really meant to go, and the agent has no idea aiguard exists.
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if origDst, err := getOriginalDestination(tcpConn); err == nil {
+			firstByte, peekErr := br.Peek(1)
+			if peekErr != nil {
+				return
+			}
+			// TLS records start with content type 0x16 (handshake).
+			if firstByte[0] == 0x16 {
+				e.handleTLSConnection(br, conn, origDst, meta)
+			} else {
+				e.handlePlaintextConnection(br, conn, origDst, meta)
+			}
+			return
+		}
 	}
 
-	// TLS records start with content type 0x16 (handshake).
-	if firstByte[0] == 0x16 {
-		e.handleTLSConnection(br, conn, origDst, meta)
-		return
-	}
-
-	e.handlePlaintextConnection(br, conn, origDst, meta)
+	// No transparent redirect (non-Linux dev hosts, or a client pointed at us
+	// with HTTP(S)_PROXY). Fall back to serving as an explicit forward proxy so
+	// the full decision pipeline can still be exercised end-to-end.
+	e.handleExplicitProxy(br, conn, meta)
 }
