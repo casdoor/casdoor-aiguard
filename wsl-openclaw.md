@@ -119,23 +119,70 @@ openclaw models status     # openai should no longer be "missing"
 
 ### Example: using DeepSeek instead of OpenAI
 
-DeepSeek is a built-in provider (`deepseek/deepseek-chat` for the general V3
-model, `deepseek/deepseek-reasoner` for the R1 reasoning model). To switch to
-it, add the key, set it as the default model, and restart:
+DeepSeek uses an OpenAI-compatible API (`deepseek/deepseek-chat` for the general
+V3 model, `deepseek/deepseek-reasoner` for the R1 reasoning model). Switching to
+it takes three parts: **(1)** add the key, **(2)** register the provider's
+models in config, and **(3)** set it as the default model, then restart.
+
+**1. Add the API key** (interactive; if the plain prompt closes without letting
+you type, pipe the key via stdin so it stays out of your shell history):
 
 ```bash
-openclaw models auth paste-api-key --provider deepseek   # paste key at prompt
-openclaw models set deepseek/deepseek-chat               # or deepseek/deepseek-reasoner
-systemctl --user restart openclaw-gateway.service
-openclaw models status                                   # Default should be deepseek/..., status=usable
+read -rs DSKEY    # paste your DeepSeek key at the (hidden) prompt, then Enter
+printf '%s' "$DSKEY" | openclaw models auth paste-api-key --provider deepseek
+unset DSKEY
 ```
 
-The same pattern works for other built-in providers — `anthropic`, `mistral`,
-`moonshot`, `cohere`, etc. Run `openclaw models list --all` to see the catalog,
-then `paste-api-key --provider <id>` and `models set <provider>/<model>`.
-You do not have to delete other providers' keys; the agent uses whatever the
-default model points to. Keep a previous provider as backup with
-`openclaw models fallbacks`.
+**2. Register the provider models.** DeepSeek is in the model *catalog*, but the
+runtime still needs `models.providers.deepseek` defined in config, otherwise you
+get `Unknown model: deepseek/deepseek-chat ... no matching
+models.providers["deepseek"].models[] entry`. Register it with the
+OpenAI-compatible adapter and endpoint. Save this as `deepseek.patch.json5`:
+
+```json5
+{
+  models: {
+    providers: {
+      deepseek: {
+        api: "openai-completions",
+        baseUrl: "https://api.deepseek.com",
+        models: [
+          { id: "deepseek-chat", name: "deepseek-chat" },
+          { id: "deepseek-reasoner", name: "deepseek-reasoner", reasoning: true }
+        ]
+      }
+    }
+  }
+}
+```
+
+Then validate and apply it:
+
+```bash
+openclaw config patch --file deepseek.patch.json5 --dry-run   # validate
+openclaw config patch --file deepseek.patch.json5             # apply
+```
+
+**3. Set the default model and restart:**
+
+```bash
+openclaw models set deepseek/deepseek-chat     # or deepseek/deepseek-reasoner
+systemctl --user restart openclaw-gateway.service
+openclaw models status                         # Default deepseek/..., status=usable
+```
+
+Verify end to end with a one-shot call:
+
+```bash
+openclaw infer model run --model deepseek/deepseek-chat --prompt 'Reply with exactly: OK'
+```
+
+The same pattern works for other providers — run `openclaw models list --all` to
+see the catalog, add the key with `paste-api-key --provider <id>`, register the
+provider under `models.providers.<id>` (with the matching `api` adapter and
+`baseUrl`), then `models set <provider>/<model>`. You do not have to delete other
+providers' keys; the agent uses whatever the default model points to. Keep a
+previous provider as backup with `openclaw models fallbacks`.
 
 > **Prefer an environment variable?** You can instead export the key (e.g.
 > `OPENAI_API_KEY`) and enable "Shell env" in the config, but that requires
