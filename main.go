@@ -23,9 +23,12 @@ import (
 	"github.com/casdoor/casdoor-aiguard/object"
 	"github.com/casdoor/casdoor-aiguard/proxy"
 	"github.com/casdoor/casdoor-aiguard/routers"
+	"github.com/casdoor/casdoor-aiguard/util"
 )
 
 func main() {
+	util.LogRuntimeEnv()
+
 	if err := object.InitSettings(); err != nil {
 		panic(err)
 	}
