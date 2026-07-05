@@ -50,6 +50,7 @@ func main() {
 	}()
 
 	routers.InitAPI()
+	routers.InitStatic()
 
 	port := web.AppConfig.DefaultInt("httpport", 9000)
 	logs.Info("aiguard management API listening on :%d", port)
