@@ -15,8 +15,12 @@
 package proxy
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
+	"os/user"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/beego/beego/v2/core/logs"
@@ -39,6 +43,7 @@ func ManageTransparentRedirect() {
 	}
 
 	proxyPort := object.GetSettings().Intercept.ProxyPort
+	logs.Info("aiguard: running as %s", describeCurrentUser())
 	redirect := NewTransparentRedirect(proxyPort)
 	if err := redirect.Install(); err != nil {
 		logs.Warn("aiguard: transparent redirect not enabled (%v). Running as an explicit forward proxy instead: point agents at HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:%d, or run aiguard as root on Linux.", err, proxyPort)
@@ -53,4 +58,42 @@ func ManageTransparentRedirect() {
 		redirect.Remove()
 		os.Exit(0)
 	}()
+}
+
+// describeCurrentUser reports the OS user and privileges aiguard is running
+// under, so the operator can see at a glance why iptables management may have
+// been refused (e.g. not root). It never fails: any lookup error is folded into
+// the returned string rather than propagated.
+func describeCurrentUser() string {
+	uid := os.Getuid()
+	euid := os.Geteuid()
+
+	name := "unknown"
+	if u, err := user.Current(); err == nil {
+		name = u.Username
+	}
+
+	parts := []string{
+		fmt.Sprintf("user=%s", name),
+		fmt.Sprintf("uid=%d", uid),
+		fmt.Sprintf("euid=%d", euid),
+		fmt.Sprintf("gid=%d", os.Getgid()),
+		fmt.Sprintf("egid=%d", os.Getegid()),
+	}
+
+	if groups, err := os.Getgroups(); err == nil && len(groups) > 0 {
+		gs := make([]string, len(groups))
+		for i, g := range groups {
+			gs[i] = strconv.Itoa(g)
+		}
+		parts = append(parts, fmt.Sprintf("groups=%s", strings.Join(gs, ",")))
+	}
+
+	if euid == 0 {
+		parts = append(parts, "root=yes")
+	} else {
+		parts = append(parts, "root=no")
+	}
+
+	return strings.Join(parts, " ")
 }
