@@ -94,14 +94,21 @@ On first run aiguard generates its local CA under `./certs/` and writes a
 default `conf/policy.yaml`. The management UI + API is served on
 `http://localhost:9000`; the interception proxy listens on `:9090`.
 
-Then, on a Linux host, turn on transparent interception and trust the CA:
+On Linux, **run aiguard as root and it installs the transparent redirect
+itself** (and removes it on exit) — no manual iptables step:
 
 ```bash
-sudo ./scripts/setup_iptables.sh 9090 $(id -u aiguard)   # redirect egress → proxy
-sudo ./scripts/install_ca.sh ./certs/aiguard-ca.crt      # trust the MITM CA
-# ... run your agents ...
-sudo ./scripts/cleanup_iptables.sh                       # undo when done
+sudo ./scripts/install_ca.sh ./certs/aiguard-ca.crt   # trust the MITM CA once
+sudo ./aiguard                                         # auto-installs iptables redirect on start
+# ... run your agents; press Ctrl-C to stop and restore iptables ...
 ```
+
+aiguard excludes its own uid from the redirect so its forwarded/upstream
+traffic never loops back into itself. Graceful shutdown (Ctrl-C, `kill`/SIGTERM,
+`systemctl stop`) tears the rules down; because `SIGKILL`/crash can't be caught,
+the next startup clears any leftover rules idempotently. `scripts/setup_iptables.sh`
+and `scripts/cleanup_iptables.sh` remain available for manual control or if you
+prefer to disable auto-management (`autoTransparentProxy = false`).
 
 ## Interception modes
 
@@ -109,7 +116,7 @@ aiguard picks a mode per connection automatically:
 
 | Mode | When | How to enable | Needs root? | Agent changes? |
 |------|------|---------------|-------------|----------------|
-| **Transparent** (production) | connection arrived via an iptables/nftables REDIRECT (`SO_ORIGINAL_DST` resolves) | `scripts/setup_iptables.sh` or `scripts/setup_nftables.sh` | yes | none |
+| **Transparent** (production) | connection arrived via an iptables/nftables REDIRECT (`SO_ORIGINAL_DST` resolves) | automatic on startup when run as root (`autoTransparentProxy = true`); or `scripts/setup_iptables.sh` | yes | none |
 | **Explicit proxy** (dev/testing) | no redirect present | point the client at aiguard: `export HTTPS_PROXY=http://localhost:9090 HTTP_PROXY=http://localhost:9090` | no | env var only |
 
 Both modes run the *identical* recognize → decide → enforce pipeline, so you can
@@ -139,6 +146,7 @@ overridden by an environment variable of the same name):
 |-----|---------|---------|
 | `httpport` | `9000` | management UI + API port |
 | `proxyPort` | `9090` | transparent/explicit interception proxy port |
+| `autoTransparentProxy` | `true` | on Linux+root, auto-install the iptables redirect on start and remove it on exit |
 | `caCertDir` | `./certs` | where the local CA cert/key are stored |
 | `policyFile` | `./conf/policy.yaml` | rule file (see below) |
 | `auditLogFile` | `./logs/audit.log` | append-only JSONL audit log |

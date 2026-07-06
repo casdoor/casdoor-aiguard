@@ -52,6 +52,8 @@ func main() {
 		}
 	}()
 
+	proxy.ManageTransparentRedirect()
+
 	routers.InitAPI()
 	routers.InitStatic()
 

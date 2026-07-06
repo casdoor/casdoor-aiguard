@@ -130,6 +130,18 @@ func PassthroughUnrecognized() bool {
 	return value == "true"
 }
 
+// AutoTransparentProxy controls whether aiguard installs the iptables
+// transparent redirect on startup and removes it on shutdown. It only takes
+// effect on Linux running as root; elsewhere it is ignored and aiguard serves
+// as an explicit forward proxy instead. Defaults to true.
+func AutoTransparentProxy() bool {
+	value := GetConfigString("autoTransparentProxy")
+	if value == "" {
+		return true
+	}
+	return value == "true"
+}
+
 // GetStepUpDefaultAction is the verdict a step-up (CIBA) decision resolves to
 // while CIBA is stubbed in stage 1: "deny" (safe default) or "allow".
 func GetStepUpDefaultAction() string {
