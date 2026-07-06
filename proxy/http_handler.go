@@ -141,7 +141,6 @@ func forwardRequest(req *http.Request, host, dialAddr string, useTLS bool, body 
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 
 	outReq := req.Clone(req.Context())
 	outReq.RequestURI = ""
@@ -156,10 +155,35 @@ func forwardRequest(req *http.Request, host, dialAddr string, useTLS bool, body 
 	outReq.Body = io.NopCloser(bytes.NewReader(body))
 
 	if err := outReq.Write(conn); err != nil {
+		conn.Close()
 		return nil, err
 	}
 
-	return http.ReadResponse(bufio.NewReader(conn), outReq)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), outReq)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	// The response body streams lazily off conn, so conn must stay open
+	// until the caller has finished reading it (which matters for chunked /
+	// SSE streaming responses like the LLM APIs return). Tie conn's close to
+	// the body's Close so the caller's `defer resp.Body.Close()` reaps both.
+	resp.Body = &connClosingBody{ReadCloser: resp.Body, conn: conn}
+	return resp, nil
+}
+
+// connClosingBody ties the upstream connection's lifetime to the response
+// body: closing the body also closes the connection it streams from.
+type connClosingBody struct {
+	io.ReadCloser
+	conn net.Conn
+}
+
+func (b *connClosingBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.conn.Close()
+	return err
 }
 
 func writeDenyResponse(conn net.Conn, reason string) {
