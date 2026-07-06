@@ -82,7 +82,21 @@ export default function DashboardPage() {
 
   const columns = [
     {title: "Time", dataIndex: "timestamp", key: "timestamp", render: (v) => new Date(v).toLocaleString()},
-    {title: "Source Agent", dataIndex: "sourceProcess", key: "sourceProcess", render: (v) => v || "(unknown)"},
+    {
+      title: "Source Agent",
+      key: "agent",
+      render: (_, record) => {
+        if (record.agent) {
+          return (
+            <span>
+              <Tag color="blue">{record.agent}</Tag>
+              {record.sourceProcess && <Text type="secondary" style={{fontSize: 12}}>{record.sourceProcess}</Text>}
+            </span>
+          );
+        }
+        return record.sourceProcess || "(unknown)";
+      },
+    },
     {title: "Destination", dataIndex: "destination", key: "destination"},
     {
       title: "Intent",

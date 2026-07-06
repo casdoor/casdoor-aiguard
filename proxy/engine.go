@@ -75,8 +75,8 @@ func (e *Engine) Serve(ln net.Listener) error {
 func (e *Engine) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	pid, procName := LookupSourceProcess(conn.RemoteAddr())
-	meta := SourceMeta{Pid: pid, ProcessName: procName}
+	pid, procName, agent := LookupSourceProcess(conn.RemoteAddr())
+	meta := SourceMeta{Pid: pid, ProcessName: procName, Agent: agent}
 
 	br := bufio.NewReader(conn)
 

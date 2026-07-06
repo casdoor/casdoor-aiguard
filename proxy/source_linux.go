@@ -26,28 +26,68 @@ import (
 	"strings"
 )
 
-// LookupSourceProcess best-effort resolves the PID and process name of the
-// local process that owns localAddr (the client side of an intercepted
-// connection), by cross-referencing /proc/net/tcp[6] socket inodes against
-// /proc/<pid>/fd symlinks. Full SPIFFE-based identity binding is a later stage.
-func LookupSourceProcess(localAddr net.Addr) (pid int, name string) {
+// LookupSourceProcess best-effort resolves the PID, process name and
+// recognized agent of the local process that owns localAddr (the client side
+// of an intercepted connection), by cross-referencing /proc/net/tcp[6] socket
+// inodes against /proc/<pid>/fd symlinks. Full SPIFFE-based identity binding is
+// a later stage.
+func LookupSourceProcess(localAddr net.Addr) (pid int, name string, agent string) {
 	tcpAddr, ok := localAddr.(*net.TCPAddr)
 	if !ok {
-		return 0, ""
+		return 0, "", ""
 	}
 
 	inode := findSocketInode(tcpAddr)
 	if inode == "" {
-		return 0, ""
+		return 0, "", ""
 	}
 
 	pid = findPidForInode(inode)
 	if pid == 0 {
-		return 0, ""
+		return 0, "", ""
 	}
 
 	name = readProcessName(pid)
-	return pid, name
+	agent = identifyAgent(pid)
+	return pid, name, agent
+}
+
+// knownAgents maps a friendly agent name to substrings that identify it in a
+// process command line. Runtimes like Node.js report a generic comm ("node"),
+// so the actual agent (e.g. openclaw) is only visible in the argv/script path.
+var knownAgents = []struct {
+	name    string
+	markers []string
+}{
+	{"openclaw", []string{"openclaw"}},
+}
+
+// maxAgentParentWalk bounds how far up the process tree identifyAgent looks.
+// The outbound LLM call can come from a forked worker whose own argv is just
+// "node", while the marker lives in an ancestor (the openclaw gateway).
+const maxAgentParentWalk = 8
+
+// identifyAgent walks the process and its ancestors, matching each command line
+// against knownAgents, and returns the recognized agent name ("" if none).
+func identifyAgent(pid int) string {
+	for i := 0; i < maxAgentParentWalk && pid > 1; i++ {
+		cmdline := strings.ToLower(readProcessCmdline(pid))
+		if cmdline != "" {
+			for _, a := range knownAgents {
+				for _, m := range a.markers {
+					if strings.Contains(cmdline, m) {
+						return a.name
+					}
+				}
+			}
+		}
+		ppid := readParentPid(pid)
+		if ppid == pid || ppid == 0 {
+			break
+		}
+		pid = ppid
+	}
+	return ""
 }
 
 func findSocketInode(addr *net.TCPAddr) string {
@@ -123,4 +163,39 @@ func readProcessName(pid int) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// readProcessCmdline returns the full argv of pid with the NUL separators
+// replaced by spaces (e.g. "node /usr/lib/node_modules/openclaw/dist/cli.js").
+func readProcessCmdline(pid int) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", " "))
+}
+
+// readParentPid returns the parent PID of pid, parsed from /proc/<pid>/stat.
+// The comm field there is wrapped in parentheses and may contain spaces, so we
+// key off the closing paren rather than splitting the whole line.
+func readParentPid(pid int) int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0
+	}
+	s := string(data)
+	rparen := strings.LastIndexByte(s, ')')
+	if rparen < 0 {
+		return 0
+	}
+	// After ") " come: state (field 3) then ppid (field 4).
+	fields := strings.Fields(s[rparen+1:])
+	if len(fields) < 2 {
+		return 0
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0
+	}
+	return ppid
 }

@@ -21,6 +21,6 @@ import "net"
 // LookupSourceProcess is only implemented on Linux, aiguard's target runtime.
 // On other platforms it's a no-op so the code still builds for local
 // development.
-func LookupSourceProcess(localAddr net.Addr) (pid int, name string) {
-	return 0, ""
+func LookupSourceProcess(localAddr net.Addr) (pid int, name string, agent string) {
+	return 0, "", ""
 }

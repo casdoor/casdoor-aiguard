@@ -28,6 +28,9 @@ import (
 type SourceMeta struct {
 	Pid         int
 	ProcessName string
+	// Agent is the recognized agent that owns the connection (e.g. "openclaw"),
+	// derived from the process command line. Empty when unrecognized.
+	Agent string
 }
 
 // Decide runs the full PEP pipeline for one intercepted, decrypted HTTP
@@ -43,6 +46,7 @@ func (e *Engine) Decide(host string, req *http.Request, body []byte, meta Source
 	// captured request, but leaves recording to the caller.
 	build := func(recognizerName string, intent *recognizers.Intent, action object.Action, reason string) (object.Action, string, *object.Event) {
 		ev := object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, action, reason)
+		ev.Agent = meta.Agent
 		ev.AttachRequest(req, body)
 		return action, reason, ev
 	}

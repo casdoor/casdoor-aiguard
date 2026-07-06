@@ -37,6 +37,7 @@ type Event struct {
 	Timestamp     time.Time           `json:"timestamp"`
 	SourcePid     int                 `json:"sourcePid,omitempty"`
 	SourceProcess string              `json:"sourceProcess,omitempty"`
+	Agent         string              `json:"agent,omitempty"`
 	Destination   string              `json:"destination"`
 	Recognizer    string              `json:"recognizer,omitempty"`
 	Intent        *recognizers.Intent `json:"intent,omitempty"`
