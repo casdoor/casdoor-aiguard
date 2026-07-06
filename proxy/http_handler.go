@@ -110,10 +110,12 @@ func (e *Engine) serveOneRequest(req *http.Request, host string, dialAddr string
 		req.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
-	action, reason := e.Decide(host, req, body, meta)
+	action, reason, event := e.Decide(host, req, body, meta)
 
 	if action == object.ActionDeny {
 		writeDenyResponse(clientConn, reason)
+		event.AttachResponse(http.StatusForbidden, reason)
+		object.RecordEvent(event)
 		return
 	}
 
@@ -121,12 +123,67 @@ func (e *Engine) serveOneRequest(req *http.Request, host string, dialAddr string
 	if err != nil {
 		logs.Warn("proxy: failed to forward request to %s: %v", host, err)
 		writeUpstreamErrorResponse(clientConn, err)
+		event.AttachResponse(http.StatusBadGateway, err.Error())
+		object.RecordEvent(event)
 		return
 	}
 	defer resp.Body.Close()
 
+	// Tee the response body into a capped buffer as it streams back to the
+	// client, so the upstream reply is captured for the audit record without
+	// buffering it up front (which would stall SSE / streaming LLM responses).
+	capture := &captureBuffer{limit: maxCaptureBytes}
+	resp.Body = &teeReadCloser{Reader: io.TeeReader(resp.Body, capture), closer: resp.Body}
+
 	resp.Write(clientConn)
+
+	event.AttachResponse(resp.StatusCode, capture.String())
+	object.RecordEvent(event)
 }
+
+// maxCaptureBytes caps how much of a streaming response body is retained for
+// the audit record; it mirrors the request-body cap in the object package.
+const maxCaptureBytes = 256 * 1024
+
+// captureBuffer is an io.Writer that retains at most `limit` bytes of what is
+// written through it (the rest is counted as written but discarded), so tee-ing
+// a large streaming response can't grow memory without bound.
+type captureBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (c *captureBuffer) Write(p []byte) (int, error) {
+	if remaining := c.limit - c.buf.Len(); remaining > 0 {
+		if remaining < len(p) {
+			c.buf.Write(p[:remaining])
+			c.truncated = true
+		} else {
+			c.buf.Write(p)
+		}
+	} else if len(p) > 0 {
+		c.truncated = true
+	}
+	return len(p), nil
+}
+
+func (c *captureBuffer) String() string {
+	if c.truncated {
+		return c.buf.String() + "\n...[truncated]"
+	}
+	return c.buf.String()
+}
+
+// teeReadCloser reads through an io.TeeReader while delegating Close to the
+// original body, so the upstream connection is still reaped when the response
+// body is closed.
+type teeReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (t *teeReadCloser) Close() error { return t.closer.Close() }
 
 // forwardRequest re-issues the (allowed) request against its real
 // destination and returns the upstream response.

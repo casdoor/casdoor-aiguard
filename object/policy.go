@@ -65,11 +65,15 @@ var (
 
 func defaultPolicy() *Policy {
 	return &Policy{
-		EnabledRecognizers: []string{"mcp", "payment-example"},
+		EnabledRecognizers: []string{"mcp", "llm", "payment-example"},
 		DefaultAction:      ActionPdp,
 		Rules: []Rule{
 			{Id: "high-value-payment-step-up", Category: "payment", MinAmount: 1000, Action: ActionStepUp},
 			{Id: "payment-needs-pdp", Category: "payment", Action: ActionPdp},
+			// LLM chat/completion traffic is allowed through and fully logged
+			// (model, prompt, request and response bodies) rather than sent to
+			// the PDP on every message.
+			{Id: "llm-allow-and-log", Category: "llm.chat", Action: ActionAllow},
 		},
 	}
 }

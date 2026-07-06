@@ -29,6 +29,11 @@ type Intent struct {
 	Action string `json:"action"`
 	// ToolName is set when the intent originates from an MCP tools/call.
 	ToolName string `json:"toolName,omitempty"`
+	// Model is the LLM model name, set by the llm recognizer (e.g. "deepseek-chat").
+	Model string `json:"model,omitempty"`
+	// Prompt is the user's question extracted from an LLM request (the last user
+	// message, or the completion prompt), set by the llm recognizer.
+	Prompt string `json:"prompt,omitempty"`
 	// Amount and Currency are populated by recognizers that identify a monetary intent.
 	Amount   float64 `json:"amount,omitempty"`
 	Currency string  `json:"currency,omitempty"`

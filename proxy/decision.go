@@ -31,11 +31,21 @@ type SourceMeta struct {
 }
 
 // Decide runs the full PEP pipeline for one intercepted, decrypted HTTP
-// request: recognize its intent, evaluate local policy, optionally call
-// Casdoor as the PDP, and record the resulting event. It returns the final
-// action to take and a human-readable reason for it.
-func (e *Engine) Decide(host string, req *http.Request, body []byte, meta SourceMeta) (object.Action, string) {
+// request: recognize its intent, evaluate local policy, and optionally call
+// Casdoor as the PDP. It returns the final action, a human-readable reason,
+// and the (unrecorded) event describing the exchange - already populated with
+// the request capture and decision. The caller attaches the upstream response
+// and records it, so a single event carries both request and response.
+func (e *Engine) Decide(host string, req *http.Request, body []byte, meta SourceMeta) (object.Action, string, *object.Event) {
 	policy := object.GetPolicy()
+
+	// build assembles the event for one decision outcome and attaches the
+	// captured request, but leaves recording to the caller.
+	build := func(recognizerName string, intent *recognizers.Intent, action object.Action, reason string) (object.Action, string, *object.Event) {
+		ev := object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, action, reason)
+		ev.AttachRequest(req, body)
+		return action, reason, ev
+	}
 
 	intent, recognizerName, recognized := e.registry.Recognize(host, req, body)
 	if !recognized {
@@ -43,21 +53,18 @@ func (e *Engine) Decide(host string, req *http.Request, body []byte, meta Source
 		if !object.GetSettings().Intercept.PassthroughUnrecognized {
 			action = object.ActionDeny
 		}
-		object.RecordEvent(object.NewEvent(host, meta.Pid, meta.ProcessName, "", nil, action, "unrecognized-traffic"))
-		return action, "unrecognized-traffic"
+		return build("", nil, action, "unrecognized-traffic")
 	}
 
 	if !policy.IsRecognizerEnabled(recognizerName) {
-		object.RecordEvent(object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, object.ActionAllow, "recognizer-disabled"))
-		return object.ActionAllow, "recognizer-disabled"
+		return build(recognizerName, intent, object.ActionAllow, "recognizer-disabled")
 	}
 
 	action, ruleReason := policy.Evaluate(intent, host)
 
 	switch action {
 	case object.ActionAllow, object.ActionDeny:
-		object.RecordEvent(object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, action, ruleReason))
-		return action, ruleReason
+		return build(recognizerName, intent, action, ruleReason)
 
 	case object.ActionStepUp:
 		// Stage 1 stubs CIBA: the operator configures whether a pending
@@ -68,30 +75,18 @@ func (e *Engine) Decide(host string, req *http.Request, body []byte, meta Source
 			stubAction = object.ActionDeny
 		}
 		reason := "step-up required (CIBA stubbed): " + ruleReason + " -> " + string(stubAction)
-		object.RecordEvent(object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, stubAction, reason))
-		return stubAction, reason
+		return build(recognizerName, intent, stubAction, reason)
 
 	default: // ActionPdp
-		return e.decideViaPdp(host, intent, recognizerName, meta)
+		source := meta.ProcessName
+		if source == "" {
+			source = "unknown-agent"
+		}
+		decision, reason := e.pdp.Decide(intent, source)
+		pdpAction := object.ActionDeny
+		if decision == casdoorclient.DecisionAllow {
+			pdpAction = object.ActionAllow
+		}
+		return build(recognizerName, intent, pdpAction, reason)
 	}
-}
-
-func (e *Engine) decideViaPdp(host string, intent *recognizers.Intent, recognizerName string, meta SourceMeta) (object.Action, string) {
-	source := meta.ProcessName
-	if source == "" {
-		source = "unknown-agent"
-	}
-
-	decision, reason := e.pdp.Decide(intent, source)
-
-	var action object.Action
-	switch decision {
-	case casdoorclient.DecisionAllow:
-		action = object.ActionAllow
-	default:
-		action = object.ActionDeny
-	}
-
-	object.RecordEvent(object.NewEvent(host, meta.Pid, meta.ProcessName, recognizerName, intent, action, reason))
-	return action, reason
 }

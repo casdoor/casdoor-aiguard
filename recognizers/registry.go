@@ -26,10 +26,11 @@ func NewRegistry(rs ...Recognizer) *Registry {
 }
 
 // Default returns the registry enabled by default in stage 1: MCP JSON-RPC
-// tool calls, and the example payment recognizer.
+// tool calls, LLM chat/completion calls, and the example payment recognizer.
 func Default() *Registry {
 	return NewRegistry(
 		&McpRecognizer{},
+		&LLMRecognizer{},
 		&PaymentRecognizer{},
 	)
 }

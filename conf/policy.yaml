@@ -1,5 +1,6 @@
 enabledRecognizers:
     - mcp
+    - llm
     - payment-example
 rules:
     - id: high-value-payment-step-up
@@ -9,4 +10,7 @@ rules:
     - id: payment-needs-pdp
       category: payment
       action: pdp
+    - id: llm-allow-and-log
+      category: llm.chat
+      action: allow
 defaultAction: pdp
