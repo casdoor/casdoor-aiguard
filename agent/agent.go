@@ -32,13 +32,14 @@ type Installation struct {
 }
 
 // IdentifyExecutable returns the agent name for a known executable layout.
-// The caller should pass the resolved /proc/<pid>/exe path on Linux.
+// On Linux, the caller should pass the resolved /proc/<pid>/exe path.
 func IdentifyExecutable(path string) string {
-	path = filepath.ToSlash(filepath.Clean(path))
+	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 	if strings.Contains(path, "/.local/share/claude/versions/") ||
-		strings.HasSuffix(path, "/.local/bin/claude") ||
-		strings.Contains(path, "/Caskroom/claude-code/") ||
-		strings.Contains(path, "/Caskroom/claude-code@latest/") ||
+		strings.HasSuffix(path, "/.local/bin/claude") || strings.HasSuffix(path, "/.local/bin/claude.exe") ||
+		strings.Contains(path, "/caskroom/claude-code/") ||
+		strings.Contains(path, "/caskroom/claude-code@latest/") ||
+		strings.Contains(path, "/microsoft/winget/packages/anthropic.claudecode_") ||
 		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code/") ||
 		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code-") {
 		return "claude-code"
