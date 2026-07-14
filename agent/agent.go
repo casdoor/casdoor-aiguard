@@ -35,6 +35,11 @@ type Installation struct {
 // On Linux, the caller should pass the resolved /proc/<pid>/exe path.
 func IdentifyExecutable(path string) string {
 	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	if strings.HasSuffix(path, "/appdata/local/anthropicclaude/claude.exe") ||
+		(strings.Contains(path, "/appdata/local/anthropicclaude/app-") && strings.HasSuffix(path, "/claude.exe")) ||
+		(strings.Contains(path, "/program files/windowsapps/claude_") && strings.Contains(path, "__pzs8sxrjxfjjc/app/claude.exe")) {
+		return "claude-desktop"
+	}
 	if strings.Contains(path, "/.local/share/claude/versions/") ||
 		strings.HasSuffix(path, "/.local/bin/claude") || strings.HasSuffix(path, "/.local/bin/claude.exe") ||
 		strings.Contains(path, "/caskroom/claude-code/") ||

@@ -36,13 +36,8 @@ var (
 )
 
 func scanWindowsDesktop(homes []windowsHome) []Installation {
-	msix := scanClaudeDesktopMSIX()
-	currentHome, _ := os.UserHomeDir()
-	result := append([]Installation(nil), msix...)
+	result := scanClaudeDesktopMSIX()
 	for _, home := range homes {
-		if len(msix) != 0 && strings.EqualFold(filepath.Clean(home.path), filepath.Clean(currentHome)) {
-			continue
-		}
 		result = append(result, scanClaudeDesktopInstaller(home)...)
 	}
 	return result
@@ -73,14 +68,14 @@ func scanClaudeDesktopMSIX() []Installation {
 	}
 	var result []Installation
 	for _, fullName := range fullNames {
-		if !strings.HasSuffix(strings.ToLower(fullName), "__pzs8sxrjxfjjc") {
-			continue
-		}
 		root := packagePath(fullName)
 		if root == "" {
 			continue
 		}
 		executable := filepath.Join(root, "app", "claude.exe")
+		if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
 		fields := strings.Split(fullName, "_")
 		version := ""
 		if len(fields) > 1 {
