@@ -42,6 +42,7 @@ func Scan() []Installation {
 		installations = append(installations, scanWindowsWinget(home)...)
 		installations = append(installations, scanWindowsNpm(home)...)
 	}
+	installations = append(installations, scanWindowsDesktop(homes)...)
 	installations = append(installations, scanMachineWinget()...)
 
 	seen := map[string]bool{}
