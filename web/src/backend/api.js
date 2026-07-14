@@ -28,6 +28,10 @@ export function getEvents(limit = 200) {
   return request(`/api/events?limit=${limit}`);
 }
 
+export function getAgents() {
+  return request("/api/agents");
+}
+
 export function getPolicy() {
   return request("/api/policy");
 }

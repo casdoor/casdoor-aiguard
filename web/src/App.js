@@ -14,17 +14,19 @@
 
 import React from "react";
 import {Layout, Menu} from "antd";
-import {DashboardOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined} from "@ant-design/icons";
+import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import PolicyPage from "./pages/PolicyPage";
 import InterceptPage from "./pages/InterceptPage";
 import CasdoorSettingsPage from "./pages/CasdoorSettingsPage";
+import AgentsPage from "./pages/AgentsPage";
 
 const {Header, Sider, Content} = Layout;
 
 const menuItems = [
   {key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link>},
+  {key: "/agents", icon: <RobotOutlined />, label: <Link to="/agents">Agents</Link>},
   {key: "/policy", icon: <SafetyCertificateOutlined />, label: <Link to="/policy">Policy</Link>},
   {key: "/intercept", icon: <ApiOutlined />, label: <Link to="/intercept">Interception</Link>},
   {key: "/casdoor", icon: <SettingOutlined />, label: <Link to="/casdoor">Casdoor Connection</Link>},
@@ -46,6 +48,7 @@ function App() {
           <Content style={{background: "#fff", padding: 24, margin: 0}}>
             <Switch>
               <Route exact path="/" component={DashboardPage} />
+              <Route exact path="/agents" component={AgentsPage} />
               <Route exact path="/policy" component={PolicyPage} />
               <Route exact path="/intercept" component={InterceptPage} />
               <Route exact path="/casdoor" component={CasdoorSettingsPage} />

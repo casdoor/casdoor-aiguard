@@ -1,0 +1,54 @@
+// Copyright 2025 The Casdoor Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package agent discovers AI agents installed on the host and identifies
+// running agent executables. Discovery is intentionally bounded to known,
+// verifiable installation layouts rather than walking the whole filesystem.
+package agent
+
+import (
+	"path/filepath"
+	"strings"
+)
+
+// Installation describes one AI agent installation found on the host.
+type Installation struct {
+	Name          string `json:"name"`
+	Version       string `json:"version,omitempty"`
+	Path          string `json:"path"`
+	InstallMethod string `json:"installMethod"`
+	Owner         string `json:"owner"`
+}
+
+// IdentifyExecutable returns the agent name for a known executable layout.
+// On Linux, the caller should pass the resolved /proc/<pid>/exe path.
+func IdentifyExecutable(path string) string {
+	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	if strings.Contains(path, "/.local/share/claude/versions/") ||
+		strings.HasSuffix(path, "/.local/bin/claude") || strings.HasSuffix(path, "/.local/bin/claude.exe") ||
+		strings.Contains(path, "/caskroom/claude-code/") ||
+		strings.Contains(path, "/caskroom/claude-code@latest/") ||
+		strings.Contains(path, "/microsoft/winget/packages/anthropic.claudecode_") ||
+		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code/") ||
+		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code-") {
+		return "claude-code"
+	}
+
+	switch path {
+	case "/usr/bin/claude", "/usr/local/bin/claude",
+		"/home/linuxbrew/.linuxbrew/bin/claude", "/opt/homebrew/bin/claude":
+		return "claude-code"
+	}
+	return ""
+}
