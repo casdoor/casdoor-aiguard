@@ -20,6 +20,7 @@ import (
 )
 
 func InitAPI() {
+	web.Router("/api/agents", &controllers.ApiController{}, "GET:GetAgents")
 	web.Router("/api/events", &controllers.ApiController{}, "GET:GetEvents")
 	web.Router("/api/policy", &controllers.ApiController{}, "GET:GetPolicy")
 	web.Router("/api/policy", &controllers.ApiController{}, "POST:UpdatePolicy")
