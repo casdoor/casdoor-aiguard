@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/casdoor/casdoor-aiguard/agent"
 )
 
 // LookupSourceProcess best-effort resolves the PID, process name and
@@ -71,6 +73,9 @@ const maxAgentParentWalk = 8
 // against knownAgents, and returns the recognized agent name ("" if none).
 func identifyAgent(pid int) string {
 	for i := 0; i < maxAgentParentWalk && pid > 1; i++ {
+		if name := agent.IdentifyExecutable(readProcessExecutable(pid)); name != "" {
+			return name
+		}
 		cmdline := strings.ToLower(readProcessCmdline(pid))
 		if cmdline != "" {
 			for _, a := range knownAgents {
@@ -88,6 +93,14 @@ func identifyAgent(pid int) string {
 		pid = ppid
 	}
 	return ""
+}
+
+func readProcessExecutable(pid int) string {
+	path, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 func findSocketInode(addr *net.TCPAddr) string {
