@@ -17,11 +17,9 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,10 +30,16 @@ type darwinHome struct {
 	path  string
 }
 
-// Scan finds supported Claude Code installations in known macOS layouts.
-// It neither executes discovered binaries nor walks arbitrary filesystem roots.
-func Scan() []Installation {
+func scanPlatform() []Installation {
 	homes := darwinHomes()
+	installations := scanClaudeCode(homes)
+	installations = append(installations, scanOpenClaw(homes)...)
+	return installations
+}
+
+// scanClaudeCode finds supported Claude Code installations in known macOS
+// layouts without executing discovered binaries.
+func scanClaudeCode(homes []darwinHome) []Installation {
 	var installations []Installation
 	for _, home := range homes {
 		installations = append(installations, scanDarwinNative(home)...)
@@ -45,24 +49,7 @@ func Scan() []Installation {
 		installations = append(installations, scanDarwinHomebrew(prefix)...)
 	}
 	installations = append(installations, scanDarwinSystemNpm()...)
-
-	seen := map[string]bool{}
-	result := installations[:0]
-	for _, installation := range installations {
-		key := darwinCanonicalPath(installation.Path)
-		if key == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		result = append(result, installation)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Owner != result[j].Owner {
-			return result[i].Owner < result[j].Owner
-		}
-		return result[i].Path < result[j].Path
-	})
-	return result
+	return installations
 }
 
 func darwinHomes() []darwinHome {
@@ -139,34 +126,23 @@ func scanDarwinNpm(home darwinHome) []Installation {
 		filepath.Join(home.path, ".local", "share", "fnm", "node-versions", "*", "installation", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
 		filepath.Join(home.path, ".volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
 		filepath.Join(home.path, ".asdf", "installs", "nodejs", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-	}, home.owner)
+	}, home.owner, "@anthropic-ai/claude-code", "Claude Code")
 }
 
 func scanDarwinSystemNpm() []Installation {
 	return scanDarwinNpmPatterns([]string{
 		"/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/package.json",
 		"/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json",
-	}, "")
+	}, "", "@anthropic-ai/claude-code", "Claude Code")
 }
 
-func scanDarwinNpmPatterns(patterns []string, owner string) []Installation {
+func scanDarwinNpmPatterns(patterns []string, owner, packageName, agentName string) []Installation {
 	var result []Installation
 	for _, pattern := range patterns {
 		matches, _ := filepath.Glob(pattern)
 		for _, packageJSON := range matches {
-			info, err := os.Stat(packageJSON)
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
-				continue
-			}
-			data, err := os.ReadFile(packageJSON)
-			if err != nil {
-				continue
-			}
-			var pkg struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(data, &pkg) != nil || pkg.Name != "@anthropic-ai/claude-code" || pkg.Version == "" {
+			version, ok := readPackageVersion(packageJSON, packageName)
+			if !ok {
 				continue
 			}
 			packageOwner := owner
@@ -174,14 +150,14 @@ func scanDarwinNpmPatterns(patterns []string, owner string) []Installation {
 				packageOwner = darwinFileOwner(packageJSON)
 			}
 			result = append(result, Installation{
-				Name: "Claude Code", Version: pkg.Version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
+				Name: agentName, Version: version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
 			})
 		}
 	}
 	return result
 }
 
-func darwinCanonicalPath(path string) string {
+func canonicalPath(path string) string {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		return resolved
 	}

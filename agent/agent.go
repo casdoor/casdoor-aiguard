@@ -18,7 +18,10 @@
 package agent
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -29,6 +32,51 @@ type Installation struct {
 	Path          string `json:"path"`
 	InstallMethod string `json:"installMethod"`
 	Owner         string `json:"owner"`
+}
+
+// Scan returns supported AI agent installations found in known platform
+// layouts. Results are de-duplicated by their resolved path.
+func Scan() []Installation {
+	return normalizeInstallations(scanPlatform())
+}
+
+func normalizeInstallations(installations []Installation) []Installation {
+	seen := map[string]bool{}
+	result := installations[:0]
+	for _, installation := range installations {
+		key := canonicalPath(installation.Path)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, installation)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Owner != result[j].Owner {
+			return result[i].Owner < result[j].Owner
+		}
+		return result[i].Path < result[j].Path
+	})
+	return result
+}
+
+func readPackageVersion(packageJSON, packageName string) (string, bool) {
+	info, err := os.Stat(packageJSON)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
+		return "", false
+	}
+	data, err := os.ReadFile(packageJSON)
+	if err != nil {
+		return "", false
+	}
+	var pkg struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &pkg) != nil || pkg.Name != packageName || pkg.Version == "" {
+		return "", false
+	}
+	return pkg.Version, true
 }
 
 // IdentifyExecutable returns the agent name for a known executable layout.

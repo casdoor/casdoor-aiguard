@@ -17,11 +17,9 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -32,10 +30,16 @@ type windowsHome struct {
 	path  string
 }
 
-// Scan finds supported Claude Code installations in known Windows layouts.
-// It neither executes discovered binaries nor walks arbitrary filesystem roots.
-func Scan() []Installation {
+func scanPlatform() []Installation {
 	homes := windowsHomes()
+	installations := scanClaudeCode(homes)
+	installations = append(installations, scanOpenClaw(homes)...)
+	return installations
+}
+
+// scanClaudeCode finds supported Claude Code installations in known Windows
+// layouts without executing discovered binaries.
+func scanClaudeCode(homes []windowsHome) []Installation {
 	var installations []Installation
 	for _, home := range homes {
 		installations = append(installations, scanWindowsNative(home)...)
@@ -44,24 +48,7 @@ func Scan() []Installation {
 	}
 	installations = append(installations, scanWindowsDesktop(homes)...)
 	installations = append(installations, scanMachineWinget()...)
-
-	seen := map[string]bool{}
-	result := installations[:0]
-	for _, installation := range installations {
-		key := strings.ToLower(windowsCanonicalPath(installation.Path))
-		if key == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		result = append(result, installation)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Owner != result[j].Owner {
-			return result[i].Owner < result[j].Owner
-		}
-		return result[i].Path < result[j].Path
-	})
-	return result
+	return installations
 }
 
 func windowsHomes() []windowsHome {
@@ -191,6 +178,17 @@ func scanWingetPackages(root, owner string) []Installation {
 }
 
 func scanWindowsNpm(home windowsHome) []Installation {
+	roaming, local := windowsDataDirs(home)
+	patterns := []string{
+		filepath.Join(roaming, "npm", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
+		filepath.Join(roaming, "nvm", "*", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
+		filepath.Join(roaming, "fnm", "node-versions", "*", "installation", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
+		filepath.Join(local, "Volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
+	}
+	return scanWindowsNpmPatterns(patterns, home.owner, "@anthropic-ai/claude-code", "Claude Code")
+}
+
+func windowsDataDirs(home windowsHome) (string, string) {
 	roaming := filepath.Join(home.path, "AppData", "Roaming")
 	local := filepath.Join(home.path, "AppData", "Local")
 	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
@@ -201,44 +199,27 @@ func scanWindowsNpm(home windowsHome) []Installation {
 			local = configured
 		}
 	}
-	patterns := []string{
-		filepath.Join(roaming, "npm", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(roaming, "nvm", "*", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(roaming, "fnm", "node-versions", "*", "installation", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(local, "Volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-	}
-	return scanWindowsNpmPatterns(patterns, home.owner)
+	return roaming, local
 }
 
-func scanWindowsNpmPatterns(patterns []string, owner string) []Installation {
+func scanWindowsNpmPatterns(patterns []string, owner, packageName, agentName string) []Installation {
 	var result []Installation
 	for _, pattern := range patterns {
 		matches, _ := filepath.Glob(pattern)
 		for _, packageJSON := range matches {
-			info, err := os.Stat(packageJSON)
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
+			version, ok := readPackageVersion(packageJSON, packageName)
+			if !ok {
 				continue
 			}
-			data, err := os.ReadFile(packageJSON)
-			if err != nil {
-				continue
-			}
-			var pkg struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(data, &pkg) != nil || pkg.Name != "@anthropic-ai/claude-code" || pkg.Version == "" {
-				continue
-			}
-			result = append(result, Installation{Name: "Claude Code", Version: pkg.Version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: owner})
+			result = append(result, Installation{Name: agentName, Version: version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: owner})
 		}
 	}
 	return result
 }
 
-func windowsCanonicalPath(path string) string {
+func canonicalPath(path string) string {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+		return strings.ToLower(resolved)
 	}
-	return filepath.Clean(path)
+	return strings.ToLower(filepath.Clean(path))
 }

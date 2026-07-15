@@ -18,12 +18,10 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -35,11 +33,17 @@ type homeDir struct {
 	path  string
 }
 
-// Scan finds supported Claude Code installations without executing any
-// discovered binary or traversing arbitrary filesystem roots.
-func Scan() []Installation {
-	installations := make([]Installation, 0)
+func scanPlatform() []Installation {
 	homes := readHomes("/etc/passwd")
+	installations := scanClaudeCode(homes)
+	installations = append(installations, scanOpenClaw(homes)...)
+	return installations
+}
+
+// scanClaudeCode finds supported Claude Code installations without executing
+// discovered binaries or traversing arbitrary filesystem roots.
+func scanClaudeCode(homes []homeDir) []Installation {
+	installations := make([]Installation, 0)
 	for _, home := range homes {
 		installations = append(installations, scanNative(home)...)
 		installations = append(installations, scanUserNpm(home)...)
@@ -47,24 +51,7 @@ func Scan() []Installation {
 	installations = append(installations, scanSystemNpm()...)
 	installations = append(installations, scanSystemPackages()...)
 	installations = append(installations, scanHomebrew()...)
-
-	seen := map[string]bool{}
-	result := installations[:0]
-	for _, installation := range installations {
-		key := canonicalPath(installation.Path)
-		if key == "" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		result = append(result, installation)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Owner != result[j].Owner {
-			return result[i].Owner < result[j].Owner
-		}
-		return result[i].Path < result[j].Path
-	})
-	return result
+	return installations
 }
 
 func readHomes(passwdPath string) []homeDir {
@@ -114,34 +101,23 @@ func scanUserNpm(home homeDir) []Installation {
 		filepath.Join(home.path, ".volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
 		filepath.Join(home.path, ".asdf", "installs", "nodejs", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
 	}
-	return scanNpmPatterns(patterns, home.owner)
+	return scanNpmPatterns(patterns, home.owner, "@anthropic-ai/claude-code", "Claude Code")
 }
 
 func scanSystemNpm() []Installation {
 	return scanNpmPatterns([]string{
 		"/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json",
 		"/usr/lib/node_modules/@anthropic-ai/claude-code/package.json",
-	}, "")
+	}, "", "@anthropic-ai/claude-code", "Claude Code")
 }
 
-func scanNpmPatterns(patterns []string, owner string) []Installation {
+func scanNpmPatterns(patterns []string, owner, packageName, agentName string) []Installation {
 	var result []Installation
 	for _, pattern := range patterns {
 		matches, _ := filepath.Glob(pattern)
 		for _, packageJSON := range matches {
-			info, err := os.Stat(packageJSON)
-			if err != nil || info.Size() > 1024*1024 {
-				continue
-			}
-			data, err := os.ReadFile(packageJSON)
-			if err != nil {
-				continue
-			}
-			var pkg struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(data, &pkg) != nil || pkg.Name != "@anthropic-ai/claude-code" || pkg.Version == "" {
+			version, ok := readPackageVersion(packageJSON, packageName)
+			if !ok {
 				continue
 			}
 			packageOwner := owner
@@ -149,7 +125,7 @@ func scanNpmPatterns(patterns []string, owner string) []Installation {
 				packageOwner = fileOwner(packageJSON)
 			}
 			result = append(result, Installation{
-				Name: "Claude Code", Version: pkg.Version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
+				Name: agentName, Version: version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
 			})
 		}
 	}
