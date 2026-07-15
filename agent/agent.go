@@ -83,25 +83,30 @@ func readPackageVersion(packageJSON, packageName string) (string, bool) {
 // On Linux, the caller should pass the resolved /proc/<pid>/exe path.
 func IdentifyExecutable(path string) string {
 	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
-	if strings.HasSuffix(path, "/appdata/local/anthropicclaude/claude.exe") ||
-		(strings.Contains(path, "/appdata/local/anthropicclaude/app-") && strings.HasSuffix(path, "/claude.exe")) ||
-		(strings.Contains(path, "/program files/windowsapps/claude_") && strings.Contains(path, "__pzs8sxrjxfjjc/app/claude.exe")) {
-		return "claude-desktop"
-	}
-	if strings.Contains(path, "/.local/share/claude/versions/") ||
-		strings.HasSuffix(path, "/.local/bin/claude") || strings.HasSuffix(path, "/.local/bin/claude.exe") ||
-		strings.Contains(path, "/caskroom/claude-code/") ||
-		strings.Contains(path, "/caskroom/claude-code@latest/") ||
-		strings.Contains(path, "/microsoft/winget/packages/anthropic.claudecode_") ||
-		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code/") ||
-		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code-") {
-		return "claude-code"
-	}
-
-	switch path {
-	case "/usr/bin/claude", "/usr/local/bin/claude",
-		"/home/linuxbrew/.linuxbrew/bin/claude", "/opt/homebrew/bin/claude":
-		return "claude-code"
+	for _, spec := range agentSpecs {
+		if spec.NpmPackage != "" && strings.Contains(path, "/node_modules/"+strings.ToLower(spec.NpmPackage)+"/") {
+			return spec.ID
+		}
+		for _, exact := range spec.ExecutablePaths {
+			if path == strings.ToLower(filepath.ToSlash(exact)) {
+				return spec.ID
+			}
+		}
+		for _, fingerprint := range spec.ExecutableFingerprints {
+			if fingerprint.Suffix != "" && !strings.HasSuffix(path, fingerprint.Suffix) {
+				continue
+			}
+			matched := true
+			for _, part := range fingerprint.Contains {
+				if !strings.Contains(path, part) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return spec.ID
+			}
+		}
 	}
 	return ""
 }

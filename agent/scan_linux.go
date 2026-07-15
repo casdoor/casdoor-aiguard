@@ -20,37 +20,30 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-type homeDir struct {
-	owner string
-	path  string
+var linuxSystemNpmTemplates = []string{
+	"/usr/local/lib/node_modules/{package}/package.json",
+	"/usr/lib/node_modules/{package}/package.json",
 }
 
 func scanPlatform() []Installation {
 	homes := readHomes("/etc/passwd")
-	installations := scanClaudeCode(homes)
-	installations = append(installations, scanOpenClaw(homes)...)
-	return installations
-}
-
-// scanClaudeCode finds supported Claude Code installations without executing
-// discovered binaries or traversing arbitrary filesystem roots.
-func scanClaudeCode(homes []homeDir) []Installation {
-	installations := make([]Installation, 0)
+	var installations []Installation
 	for _, home := range homes {
-		installations = append(installations, scanNative(home)...)
-		installations = append(installations, scanUserNpm(home)...)
+		values := pathValues{platform: "unix", home: home.path}
+		installations = append(installations, scanNpmInstallations(unixUserNpmTemplates, values, home.owner)...)
+		installations = append(installations, scanNativeInstallations(home, false)...)
+		installations = append(installations, scanGitInstallations(home, false)...)
 	}
-	installations = append(installations, scanSystemNpm()...)
-	installations = append(installations, scanSystemPackages()...)
-	installations = append(installations, scanHomebrew()...)
+	installations = append(installations, scanNpmInstallations(linuxSystemNpmTemplates, pathValues{platform: "unix"}, "")...)
+	installations = append(installations, scanLinuxPackages()...)
+	for _, prefix := range []string{"/home/linuxbrew/.linuxbrew", "/opt/homebrew", "/usr/local"} {
+		installations = append(installations, scanHomebrewInstallations(prefix)...)
+	}
 	return installations
 }
 
@@ -77,143 +70,44 @@ func readHomes(passwdPath string) []homeDir {
 	return homes
 }
 
-func scanNative(home homeDir) []Installation {
-	launcher := filepath.Join(home.path, ".local", "bin", "claude")
-	info, err := os.Stat(launcher)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-		return nil
-	}
-
-	version := ""
-	if target, err := filepath.EvalSymlinks(launcher); err == nil {
-		versionsDir := filepath.Join(home.path, ".local", "share", "claude", "versions") + string(filepath.Separator)
-		if strings.HasPrefix(target, versionsDir) {
-			version = filepath.Base(target)
-		}
-	}
-	return []Installation{{Name: "Claude Code", Version: version, Path: launcher, InstallMethod: "native", Owner: home.owner}}
-}
-
-func scanUserNpm(home homeDir) []Installation {
-	patterns := []string{
-		filepath.Join(home.path, ".nvm", "versions", "node", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".local", "share", "fnm", "node-versions", "*", "installation", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".asdf", "installs", "nodejs", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-	}
-	return scanNpmPatterns(patterns, home.owner, "@anthropic-ai/claude-code", "Claude Code")
-}
-
-func scanSystemNpm() []Installation {
-	return scanNpmPatterns([]string{
-		"/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json",
-		"/usr/lib/node_modules/@anthropic-ai/claude-code/package.json",
-	}, "", "@anthropic-ai/claude-code", "Claude Code")
-}
-
-func scanNpmPatterns(patterns []string, owner, packageName, agentName string) []Installation {
+func scanLinuxPackages() []Installation {
 	var result []Installation
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(pattern)
-		for _, packageJSON := range matches {
-			version, ok := readPackageVersion(packageJSON, packageName)
-			if !ok {
-				continue
-			}
-			packageOwner := owner
-			if packageOwner == "" {
-				packageOwner = fileOwner(packageJSON)
-			}
-			result = append(result, Installation{
-				Name: agentName, Version: version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
-			})
+	for _, spec := range agentSpecs {
+		if spec.LinuxPackage == "" {
+			continue
+		}
+		if version, ok := commandOutput("dpkg-query", "-W", "-f=${Version}", spec.LinuxPackage); ok {
+			files, _ := commandOutput("dpkg", "-L", spec.LinuxPackage)
+			result = append(result, linuxPackageInstallation(spec, "apt", version, files))
+		}
+		if version, ok := commandOutput("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", spec.LinuxPackage); ok {
+			files, _ := commandOutput("rpm", "-ql", spec.LinuxPackage)
+			result = append(result, linuxPackageInstallation(spec, "rpm", version, files))
+		}
+		if installed, ok := commandOutput("apk", "info", "-e", spec.LinuxPackage); ok && strings.TrimSpace(installed) != "" {
+			version, _ := commandOutput("apk", "info", "-v", spec.LinuxPackage)
+			files, _ := commandOutput("apk", "info", "-L", spec.LinuxPackage)
+			version = strings.TrimPrefix(strings.TrimSpace(version), spec.LinuxPackage+"-")
+			result = append(result, linuxPackageInstallation(spec, "apk", version, files))
 		}
 	}
 	return result
 }
 
-func scanSystemPackages() []Installation {
-	var result []Installation
-	if version, ok := commandOutput("dpkg-query", "-W", "-f=${Version}", "claude-code"); ok {
-		path, _ := commandOutput("dpkg", "-L", "claude-code")
-		result = append(result, packageInstallation("apt", version, path))
-	}
-	if version, ok := commandOutput("rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", "claude-code"); ok {
-		path, _ := commandOutput("rpm", "-ql", "claude-code")
-		result = append(result, packageInstallation("rpm", version, path))
-	}
-	if installed, ok := commandOutput("apk", "info", "-e", "claude-code"); ok && strings.TrimSpace(installed) != "" {
-		version, _ := commandOutput("apk", "info", "-v", "claude-code")
-		path, _ := commandOutput("apk", "info", "-L", "claude-code")
-		version = strings.TrimPrefix(strings.TrimSpace(version), "claude-code-")
-		result = append(result, packageInstallation("apk", version, path))
-	}
-	return result
-}
-
-func packageInstallation(method, version, files string) Installation {
-	path := findClaudePath(files)
+func linuxPackageInstallation(spec agentSpec, method, version, files string) Installation {
+	path := findBinaryPath(files, spec.Binary)
 	if path == "" {
-		path = "/usr/bin/claude"
+		path = filepath.Join("/usr/bin", spec.Binary)
 	}
-	return Installation{Name: "Claude Code", Version: strings.TrimSpace(version), Path: path, InstallMethod: method, Owner: "root"}
+	return Installation{
+		Name: spec.Name, Version: strings.TrimSpace(version), Path: path, InstallMethod: method, Owner: "root",
+	}
 }
 
-func scanHomebrew() []Installation {
-	brewPaths := []string{"/home/linuxbrew/.linuxbrew/bin/brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"}
-	var result []Installation
-	for _, brew := range brewPaths {
-		if info, err := os.Stat(brew); err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		owner := fileOwner(brew)
-		prefix := filepath.Dir(filepath.Dir(brew))
-		result = append(result, scanHomebrewCaskroom(prefix, owner)...)
-		for _, cask := range []string{"claude-code", "claude-code@latest"} {
-			out, ok := commandOutputPath(brew, "list", "--cask", "--versions", cask)
-			if !ok || strings.TrimSpace(out) == "" {
-				continue
-			}
-			fields := strings.Fields(out)
-			version := ""
-			if len(fields) > 1 {
-				version = fields[len(fields)-1]
-			}
-			files, _ := commandOutputPath(brew, "list", "--cask", cask)
-			path := findClaudePath(files)
-			if path == "" {
-				path = filepath.Join(filepath.Dir(brew), "claude")
-			}
-			result = append(result, Installation{Name: "Claude Code", Version: version, Path: path, InstallMethod: "homebrew", Owner: owner})
-		}
-	}
-	return result
-}
-
-func scanHomebrewCaskroom(prefix, owner string) []Installation {
-	launcher := filepath.Join(prefix, "bin", "claude")
-	target, err := filepath.EvalSymlinks(launcher)
-	if err != nil {
-		return nil
-	}
-	for _, cask := range []string{"claude-code", "claude-code@latest"} {
-		root := filepath.Join(prefix, "Caskroom", cask)
-		relative, err := filepath.Rel(root, target)
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			continue
-		}
-		version := strings.Split(relative, string(filepath.Separator))[0]
-		if version != "" && version != "." {
-			return []Installation{{Name: "Claude Code", Version: version, Path: launcher, InstallMethod: "homebrew", Owner: owner}}
-		}
-	}
-	return nil
-}
-
-func findClaudePath(files string) string {
+func findBinaryPath(files, binary string) string {
 	for _, line := range strings.Split(files, "\n") {
 		line = strings.TrimSpace(line)
-		if filepath.Base(line) == "claude" {
+		if filepath.Base(line) == binary {
 			return line
 		}
 	}
@@ -233,27 +127,4 @@ func commandOutputPath(path string, args ...string) (string, bool) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, args...).Output()
 	return string(out), err == nil
-}
-
-func canonicalPath(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
-	}
-	return filepath.Clean(path)
-}
-
-func fileOwner(path string) string {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "root"
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "root"
-	}
-	account, err := user.LookupId(strconv.FormatUint(uint64(stat.Uid), 10))
-	if err != nil {
-		return strconv.FormatUint(uint64(stat.Uid), 10)
-	}
-	return account.Username
 }

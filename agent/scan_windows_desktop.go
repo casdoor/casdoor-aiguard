@@ -27,63 +27,63 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const claudeDesktopPackageFamily = "Claude_pzs8sxrjxfjjc"
-
 var (
 	kernel32                   = windows.NewLazySystemDLL("kernel32.dll")
 	getPackagesByPackageFamily = kernel32.NewProc("GetPackagesByPackageFamily")
 	getPackagePathByFullName   = kernel32.NewProc("GetPackagePathByFullName")
 )
 
-func scanWindowsDesktop(homes []windowsHome) []Installation {
-	result := scanClaudeDesktopMSIX()
+func scanWindowsDesktop(homes []homeDir) []Installation {
+	result := scanDesktopMSIX()
 	for _, home := range homes {
-		result = append(result, scanClaudeDesktopInstaller(home)...)
+		result = append(result, scanDesktopInstallers(home)...)
 	}
 	return result
 }
 
-func scanClaudeDesktopInstaller(home windowsHome) []Installation {
-	localAppData := filepath.Join(home.path, "AppData", "Local")
-	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
-		if configured := os.Getenv("LOCALAPPDATA"); configured != "" {
-			localAppData = configured
+func scanDesktopInstallers(home homeDir) []Installation {
+	_, local := windowsDataDirs(home)
+	var result []Installation
+	for _, spec := range agentSpecs {
+		if spec.WindowsDesktop == nil || spec.WindowsDesktop.InstallerPath == "" {
+			continue
+		}
+		executable := filepath.Join(local, filepath.FromSlash(spec.WindowsDesktop.InstallerPath))
+		if info, err := os.Stat(executable); err == nil && info.Mode().IsRegular() {
+			result = append(result, Installation{Name: spec.Name, Path: executable, InstallMethod: "desktop-installer", Owner: home.owner})
 		}
 	}
-	executable := filepath.Join(localAppData, "AnthropicClaude", "claude.exe")
-	if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
-		return nil
-	}
-	return []Installation{{Name: "Claude Desktop", Path: executable, InstallMethod: "desktop-installer", Owner: home.owner}}
+	return result
 }
 
-func scanClaudeDesktopMSIX() []Installation {
-	fullNames := packageFullNames(claudeDesktopPackageFamily)
-	if len(fullNames) == 0 {
-		return nil
-	}
+func scanDesktopMSIX() []Installation {
 	owner := ""
 	if account, err := user.Current(); err == nil {
 		owner = account.Username
 	}
 	var result []Installation
-	for _, fullName := range fullNames {
-		root := packagePath(fullName)
-		if root == "" {
+	for _, spec := range agentSpecs {
+		if spec.WindowsDesktop == nil || spec.WindowsDesktop.PackageFamily == "" {
 			continue
 		}
-		executable := filepath.Join(root, "app", "claude.exe")
-		if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
-			continue
+		for _, fullName := range packageFullNames(spec.WindowsDesktop.PackageFamily) {
+			root := packagePath(fullName)
+			if root == "" {
+				continue
+			}
+			executable := filepath.Join(root, filepath.FromSlash(spec.WindowsDesktop.MSIXExecutable))
+			if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			fields := strings.Split(fullName, "_")
+			version := ""
+			if len(fields) > 1 {
+				version = fields[1]
+			}
+			result = append(result, Installation{
+				Name: spec.Name, Version: version, Path: executable, InstallMethod: "msix", Owner: owner,
+			})
 		}
-		fields := strings.Split(fullName, "_")
-		version := ""
-		if len(fields) > 1 {
-			version = fields[1]
-		}
-		result = append(result, Installation{
-			Name: "Claude Desktop", Version: version, Path: executable, InstallMethod: "msix", Owner: owner,
-		})
 	}
 	return result
 }
