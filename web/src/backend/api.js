@@ -43,6 +43,12 @@ export function signout() {
   return request("/api/signout", {method: "POST"});
 }
 
+// The machine aiguard is installed on - the UI shows it to make clear that an
+// aiguard instance guards one specific host.
+export function getHostInfo() {
+  return request("/api/host-info");
+}
+
 export function getEvents(limit = 200) {
   return request(`/api/events?limit=${limit}`);
 }

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 import React, {useCallback, useEffect, useState} from "react";
-import {Layout, Menu} from "antd";
-import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined} from "@ant-design/icons";
+import {Layout, Menu, Tag, Tooltip} from "antd";
+import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined, DesktopOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import PolicyHubPage from "./pages/PolicyHubPage";
@@ -25,7 +25,7 @@ import AgentsPage from "./pages/AgentsPage";
 import RecordsPage from "./pages/RecordsPage";
 import AccountArea from "./auth/AccountArea";
 import AuthCallback from "./auth/AuthCallback";
-import {getAccount, getAuthConfig} from "./backend/api";
+import {getAccount, getAuthConfig, getHostInfo} from "./backend/api";
 import {CasdoorLogo} from "./theme";
 
 const {Header, Sider, Content, Footer} = Layout;
@@ -56,10 +56,14 @@ function App() {
   // login is optional, so neither one blocks the pages from rendering.
   const [authConfig, setAuthConfig] = useState(null);
   const [account, setAccount] = useState(null);
+  // The host aiguard is installed on, shown in the top bar so it is clear that
+  // this instance guards this machine.
+  const [hostInfo, setHostInfo] = useState(null);
 
   useEffect(() => {
     getAuthConfig().then(setAuthConfig).catch(() => setAuthConfig(null));
     getAccount().then(setAccount).catch(() => setAccount(null));
+    getHostInfo().then(setHostInfo).catch(() => setHostInfo(null));
   }, []);
 
   const onSignedIn = useCallback((claims) => setAccount(claims), []);
@@ -85,7 +89,16 @@ function App() {
           <img src={CasdoorLogo} alt="Casdoor" style={{height: 26, objectFit: "contain"}} />
           <span style={{color: "#262626", fontSize: 18, fontWeight: 600, letterSpacing: 0.2}}>AIGuard</span>
         </Link>
-        <AccountArea authConfig={authConfig} account={account} onSignedOut={() => setAccount(null)} />
+        <div style={{display: "flex", alignItems: "center", gap: 16}}>
+          {hostInfo &&
+            <Tooltip title={`AIGuard is protecting this machine (${hostInfo.os}/${hostInfo.arch})`}>
+              <Tag icon={<DesktopOutlined />} color="blue" style={{marginInlineEnd: 0, fontSize: 13, padding: "2px 10px", borderRadius: 14}}>
+                {hostInfo.hostname}
+              </Tag>
+            </Tooltip>
+          }
+          <AccountArea authConfig={authConfig} account={account} onSignedOut={() => setAccount(null)} />
+        </div>
       </Header>
       <Layout>
         <Sider
