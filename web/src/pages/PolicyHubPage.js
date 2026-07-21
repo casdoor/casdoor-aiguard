@@ -34,7 +34,7 @@ function matchesOs(policySet, os) {
   return policySet.os === os || osFamily(policySet.os) === os;
 }
 
-function matches(policySet, {search, agent, os, strictness}) {
+function matches(policySet, {search, agent, os, strictness, topic}) {
   if (agent && policySet.agent !== agent) {
     return false;
   }
@@ -42,6 +42,9 @@ function matches(policySet, {search, agent, os, strictness}) {
     return false;
   }
   if (strictness && policySet.strictness !== strictness) {
+    return false;
+  }
+  if (topic && !(policySet.tags || []).includes(topic)) {
     return false;
   }
   if (!search) {
@@ -79,6 +82,19 @@ function osOptions(policySets) {
         ],
       };
     }),
+  ];
+}
+
+// Topics are the free-form tags a set carries beyond its agent and OS -
+// "coding", "llm-egress" and the like. Every distinct one becomes a Topic
+// filter entry so a reader can narrow the grid to a category, the same way the
+// agent and OS facets narrow it to a target.
+function topicOptions(policySets) {
+  const topics = new Set();
+  policySets.forEach((policySet) => (policySet.tags || []).forEach((tag) => topics.add(tag)));
+  return [
+    {value: "", label: "Topic: All"},
+    ...Array.from(topics).sort((a, b) => a.localeCompare(b)).map((topic) => ({value: topic, label: topic})),
   ];
 }
 
@@ -136,7 +152,20 @@ function enableRank(policySet) {
   return policySet.canEnable ? 1 : 2;
 }
 
-function PolicySetCard({policySet, onOpen, onToggle}) {
+// A card's tags double as filters: clicking the agent, OS or a topic tag narrows
+// the grid by that facet, the same as picking it from the selects above. The
+// click must not bubble to the card, which would open the set instead.
+function FilterTag({field, value, onFilter, ...props}) {
+  return (
+    <Tag
+      {...props}
+      style={{...props.style, cursor: "pointer"}}
+      onClick={(e) => {e.stopPropagation(); onFilter(field, value);}}
+    />
+  );
+}
+
+function PolicySetCard({policySet, onOpen, onToggle, onFilter}) {
   const strictness = policySet.strictness || "";
 
   return (
@@ -167,9 +196,9 @@ function PolicySetCard({policySet, onOpen, onToggle}) {
         </Paragraph>
 
         <div style={{display: "flex", flexWrap: "wrap", gap: 4, marginTop: "auto"}}>
-          {policySet.agent && <Tag color="blue" style={{margin: 0}}>{policySet.agent}</Tag>}
-          {policySet.os && <Tag color="geekblue" style={{margin: 0}}>{policySet.os}</Tag>}
-          {(policySet.tags || []).map((tag) => <Tag key={tag} style={{margin: 0}}>{tag}</Tag>)}
+          {policySet.agent && <FilterTag field="agent" value={policySet.agent} onFilter={onFilter} color="blue" style={{margin: 0}}>{policySet.agent}</FilterTag>}
+          {policySet.os && <FilterTag field="os" value={policySet.os} onFilter={onFilter} color="geekblue" style={{margin: 0}}>{policySet.os}</FilterTag>}
+          {(policySet.tags || []).map((tag) => <FilterTag key={tag} field="topic" value={tag} onFilter={onFilter} style={{margin: 0}}>{tag}</FilterTag>)}
         </div>
 
         <div style={{marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8}}>
@@ -194,6 +223,18 @@ export default function PolicyHubPage() {
   const [agent, setAgent] = useState("");
   const [os, setOs] = useState("");
   const [strictness, setStrictness] = useState("");
+  const [topic, setTopic] = useState("");
+
+  // Clicking a tag on a card routes here. It clears every other facet and keeps
+  // only the clicked one, so a tag click reads as "show me just this" rather
+  // than narrowing whatever filters happened to be set.
+  const onFilter = (field, value) => {
+    setSearch("");
+    setAgent(field === "agent" ? value : "");
+    setOs(field === "os" ? value : "");
+    setStrictness("");
+    setTopic(field === "topic" ? value : "");
+  };
 
   const load = useCallback(() => {
     return getPolicySets()
@@ -224,9 +265,9 @@ export default function PolicyHubPage() {
   // (Array.prototype.sort is stable), so enabled sets lead, ready-to-enable sets
   // follow, and sets this host cannot enforce sink to the bottom.
   const filtered = policySets
-    .filter((policySet) => matches(policySet, {search, agent, os, strictness}))
+    .filter((policySet) => matches(policySet, {search, agent, os, strictness, topic}))
     .sort((a, b) => enableRank(a) - enableRank(b));
-  const isFiltered = !!(search || agent || os || strictness);
+  const isFiltered = !!(search || agent || os || strictness || topic);
 
   const option = (label, values) => [
     {value: "", label: `${label}: All`},
@@ -262,13 +303,19 @@ export default function PolicyHubPage() {
         />
         <Select value={os} onChange={setOs} style={{minWidth: 160}} options={osOptions(policySets)} />
         <Select
+          value={topic}
+          onChange={setTopic}
+          style={{minWidth: 160}}
+          options={topicOptions(policySets)}
+        />
+        <Select
           value={strictness}
           onChange={setStrictness}
           style={{minWidth: 170}}
           options={option("Strictness", STRICTNESS_ORDER.filter((value) => policySets.some((policySet) => policySet.strictness === value)))}
         />
         {isFiltered && (
-          <Button onClick={() => {setSearch(""); setAgent(""); setOs(""); setStrictness("");}}>Reset</Button>
+          <Button onClick={() => {setSearch(""); setAgent(""); setOs(""); setStrictness(""); setTopic("");}}>Reset</Button>
         )}
         <Text type="secondary" style={{fontSize: 13}}>
           {isFiltered ? `${filtered.length} / ${policySets.length}` : policySets.length} policy sets
@@ -290,6 +337,7 @@ export default function PolicyHubPage() {
               policySet={policySet}
               onOpen={() => history.push(`/policyhub/${policySet.name}`)}
               onToggle={onToggle}
+              onFilter={onFilter}
             />
           ))}
         </Row>
