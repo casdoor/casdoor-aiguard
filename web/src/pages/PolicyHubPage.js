@@ -14,7 +14,7 @@
 
 import React, {useCallback, useEffect, useState} from "react";
 import {Alert, Button, Card, Col, Empty, Input, Row, Select, Spin, Switch, Tag, Tooltip, Typography, message} from "antd";
-import {ArrowRightOutlined, SafetyCertificateOutlined} from "@ant-design/icons";
+import {ArrowRightOutlined, QuestionCircleOutlined, SafetyCertificateOutlined} from "@ant-design/icons";
 import {useHistory} from "react-router-dom";
 import {getPolicySets, setPolicySetEnabled} from "../backend/api";
 import {AGENT_ORDER, AgentIcon, OS_FAMILIES, STRICTNESS_COLORS, STRICTNESS_ORDER, countPolicyRules, osFamily, sortByOrder} from "./policySetUtil";
@@ -84,13 +84,31 @@ function osOptions(policySets) {
 
 // EnableControl is the switch that turns a set on for live interception. It sits
 // inside the card, which navigates on click, so every interaction stops the
-// click from bubbling. When the host cannot enforce the set (agent not patched,
-// wrong OS) the switch is disabled and the reason shows as a tooltip; an already
-// enabled set can always be turned off.
+// click from bubbling. A set the host cannot enforce (agent not patched, wrong
+// OS) shows no switch at all - only a muted "Disabled" with a "Why?" hint whose
+// tooltip names the blocker. An already-enabled set can always be turned off, so
+// it keeps its switch even if it could not be re-enabled from scratch.
 function EnableControl({policySet, onToggle}) {
   const [busy, setBusy] = useState(false);
   const {enabled, canEnable, enableReason} = policySet;
   const blocked = !enabled && !canEnable;
+
+  if (blocked) {
+    return (
+      <Tooltip title={enableReason}>
+        <span
+          onClick={(e) => e.stopPropagation()}
+          style={{display: "inline-flex", alignItems: "center", gap: 8, cursor: "help"}}
+        >
+          <Text type="secondary" style={{fontSize: 13}}>Disabled</Text>
+          <span style={{display: "inline-flex", alignItems: "center", gap: 4, color: "#1677ff", fontSize: 13}}>
+            <QuestionCircleOutlined />
+            Why?
+          </span>
+        </span>
+      </Tooltip>
+    );
+  }
 
   const handleToggle = (checked, event) => {
     event?.stopPropagation?.();
@@ -98,17 +116,24 @@ function EnableControl({policySet, onToggle}) {
     Promise.resolve(onToggle(policySet, checked)).finally(() => setBusy(false));
   };
 
-  const control = (
+  return (
     <span
       onClick={(e) => e.stopPropagation()}
       style={{display: "inline-flex", alignItems: "center", gap: 8}}
     >
-      <Switch size="small" checked={!!enabled} disabled={busy || blocked} loading={busy} onChange={handleToggle} />
+      <Switch size="small" checked={!!enabled} disabled={busy} loading={busy} onChange={handleToggle} />
       <Text style={{fontSize: 13}} type={enabled ? undefined : "secondary"}>{enabled ? "Enabled" : "Disabled"}</Text>
     </span>
   );
+}
 
-  return blocked && enableReason ? <Tooltip title={enableReason}>{control}</Tooltip> : control;
+// enableRank orders cards by how live they are: enabled sets first, then sets
+// that could be enabled right now, then sets this host cannot enforce at all.
+function enableRank(policySet) {
+  if (policySet.enabled) {
+    return 0;
+  }
+  return policySet.canEnable ? 1 : 2;
 }
 
 function PolicySetCard({policySet, onOpen, onToggle}) {
@@ -195,7 +220,12 @@ export default function PolicyHubPage() {
       .catch((err) => message.error(err.message));
   };
 
-  const filtered = policySets.filter((policySet) => matches(policySet, {search, agent, os, strictness}));
+  // Sort by enablement rank, keeping the server's name order within each rank
+  // (Array.prototype.sort is stable), so enabled sets lead, ready-to-enable sets
+  // follow, and sets this host cannot enforce sink to the bottom.
+  const filtered = policySets
+    .filter((policySet) => matches(policySet, {search, agent, os, strictness}))
+    .sort((a, b) => enableRank(a) - enableRank(b));
   const isFiltered = !!(search || agent || os || strictness);
 
   const option = (label, values) => [

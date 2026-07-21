@@ -42,3 +42,4 @@ lastupdate.tmp
 commentsRouter*.go
 
 data/patches
+policyset_state.json

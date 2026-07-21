@@ -17,6 +17,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/casdoor/casdoor-aiguard/agent"
 	"github.com/casdoor/casdoor-aiguard/object"
@@ -54,19 +55,19 @@ func scanAgentPresence() agentPresence {
 // (the one step the operator can take right here).
 func gatePolicySet(set *object.PolicySet, presence agentPresence) (bool, string) {
 	if set.Agent == "" {
-		return false, "This policy set names no agent to enforce on"
+		return false, "This policy set doesn't name an agent to protect, so there is nothing to enforce it on."
 	}
 	if !object.IsInterceptCapableAgent(set.Agent) {
-		return false, fmt.Sprintf("Interception isn't supported for %s yet", set.Agent)
+		return false, fmt.Sprintf("AIGuard can't enforce policies on %s yet - so far only %s can be guarded.", set.Agent, strings.Join(object.InterceptCapableAgentNames(), " and "))
 	}
 	if !object.MatchesHostOs(set.Os) {
-		return false, fmt.Sprintf("This set targets %s; this host runs %s", set.Os, object.HostOsFamily())
+		return false, fmt.Sprintf("This policy set is for %s, but AIGuard is running on %s.", set.Os, object.HostOsFamily())
 	}
 	if !presence.installed[set.Agent] {
-		return false, fmt.Sprintf("%s isn't installed - install and patch it on the Agents page", set.Agent)
+		return false, fmt.Sprintf("%s isn't installed on this machine. Install it, then patch it on the Agents page to enable this set.", set.Agent)
 	}
 	if !presence.patched[set.Agent] {
-		return false, fmt.Sprintf("%s is installed but not patched - patch it on the Agents page first", set.Agent)
+		return false, fmt.Sprintf("%s is installed but not patched yet. Patch it on the Agents page to enable this set.", set.Agent)
 	}
 	return true, ""
 }

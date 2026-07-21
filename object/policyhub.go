@@ -150,6 +150,18 @@ func IsInterceptCapableAgent(agent string) bool {
 	return interceptCapableAgents[agent]
 }
 
+// InterceptCapableAgentNames lists, sorted, the agents aiguard can enforce
+// policies on today. Used to tell the operator which agents a set could target
+// when the one it names isn't supported yet.
+func InterceptCapableAgentNames() []string {
+	names := make([]string, 0, len(interceptCapableAgents))
+	for name := range interceptCapableAgents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // GetPolicySets reads every JSON file in the policy hub directory. The
 // directory is scanned on each call, so dropping in a new file publishes a new
 // policy set without a restart. A missing directory simply means an empty hub.
