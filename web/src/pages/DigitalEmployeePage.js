@@ -13,28 +13,36 @@
 // limitations under the License.
 
 import React, {useCallback, useEffect, useState} from "react";
-import {Alert, Button, Card, Col, Row, Space, Spin, Tag, Typography} from "antd";
-import {ArrowLeftOutlined, PlayCircleOutlined, ReloadOutlined} from "@ant-design/icons";
-import {useHistory, useParams} from "react-router-dom";
-import {getPolicySet} from "../backend/api";
+import {Alert, Avatar, Button, Card, Col, Row, Space, Spin, Tag, Tooltip, Typography, message} from "antd";
+import {IdcardOutlined, MergeCellsOutlined, PlayCircleOutlined, ReloadOutlined, SaveOutlined} from "@ant-design/icons";
+import {useHistory} from "react-router-dom";
+import {updateEmployeePolicySet} from "../backend/api";
 import {enforce} from "../utils/casbin";
-import {PolicyEditor, ResultTable} from "./PolicyEditor";
-import {AgentIcon, STRICTNESS_COLORS, countPolicyRules} from "./policySetUtil";
+import {PolicyEditor, ResultTable, editorStyle} from "./PolicyEditor";
+import {EmployeeUnavailable, useEmployeePolicySet} from "./employeePolicySet";
+import {countPolicyRules} from "./policySetUtil";
 
 const {Title, Text, Paragraph} = Typography;
 
-export default function PolicySetPage() {
-  const {name} = useParams();
-  const history = useHistory();
+// A digital employee is the signed-in person seen as a Casbin subject: the same
+// model/policy/requests a Policy Hub set is made of, but written about what
+// this human is entitled to rather than what one agent may do. It is stored on
+// their Casdoor user, so it follows them to any machine aiguard guards.
+//
+// This page is where that set is written. What it means together with an
+// agent's set is the Policy Fusion page's job.
 
-  const [policySet, setPolicySet] = useState(null);
+export default function DigitalEmployeePage({account}) {
+  const history = useHistory();
+  const {policySet, loadError, reload, setPolicySet} = useEmployeePolicySet();
+
+  const [saving, setSaving] = useState(false);
   const [model, setModel] = useState("");
   const [policy, setPolicy] = useState("");
   const [request, setRequest] = useState("");
 
   const [results, setResults] = useState([]);
   const [error, setError] = useState(null);
-  const [loadError, setLoadError] = useState(null);
   const [running, setRunning] = useState(false);
 
   const reset = useCallback((data) => {
@@ -44,13 +52,10 @@ export default function PolicySetPage() {
   }, []);
 
   useEffect(() => {
-    getPolicySet(name)
-      .then((data) => {
-        setPolicySet(data);
-        reset(data);
-      })
-      .catch((err) => setLoadError(err.message));
-  }, [name, reset]);
+    if (policySet) {
+      reset(policySet);
+    }
+  }, [policySet, reset]);
 
   // Re-enforce shortly after typing stops, so editing the model, the policy or
   // the requests updates the decisions without pressing anything.
@@ -76,47 +81,57 @@ export default function PolicySetPage() {
     return () => clearTimeout(timer);
   }, [model, policy, request]);
 
+  const save = () => {
+    setSaving(true);
+    updateEmployeePolicySet({model, policy, request})
+      .then((data) => {
+        setPolicySet(data);
+        message.success("Your digital employee's policy set was saved to Casdoor");
+      })
+      .catch((err) => message.error(err.message))
+      .finally(() => setSaving(false));
+  };
+
   if (loadError) {
-    return (
-      <div>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => history.push("/policyhub")}>Back to Policy Hub</Button>
-        <Alert type="error" message={loadError} style={{marginTop: 16}} />
-      </div>
-    );
+    return <EmployeeUnavailable error={loadError} account={account} onRetry={reload} />;
   }
 
   if (!policySet) {
     return <div style={{textAlign: "center", padding: "80px 0"}}><Spin size="large" /></div>;
   }
 
+  const dirty = model !== policySet.model || policy !== policySet.policy || request !== policySet.request;
   const allowed = results.filter((row) => row.allowed).length;
   const evaluated = results.filter((row) => !row.skipped).length;
 
   return (
     <div>
-      <Button type="link" icon={<ArrowLeftOutlined />} style={{paddingLeft: 0}} onClick={() => history.push("/policyhub")}>
-        Policy Hub
-      </Button>
-
-      <div style={{display: "flex", alignItems: "flex-start", gap: 12, marginTop: 8}}>
-        <div style={{fontSize: 32, lineHeight: "40px"}}>
-          <AgentIcon agent={policySet.agent} size={34} fallback={policySet.icon} />
-        </div>
+      <div style={{display: "flex", alignItems: "flex-start", gap: 14}}>
+        <Avatar size={44} src={account && account.avatar} icon={<IdcardOutlined />} />
         <div style={{flex: 1}}>
           <Space align="center" wrap>
             <Title level={3} style={{margin: 0}}>{policySet.displayName}</Title>
-            {policySet.strictness && <Tag color={STRICTNESS_COLORS[policySet.strictness]}>{policySet.strictness}</Tag>}
+            <Tag color="purple">digital employee</Tag>
+            {policySet.stored
+              ? <Tag color="blue">saved on Casdoor</Tag>
+              : <Tooltip title="You have never saved a policy set, so these are starter rules written about you. Edit them and press Save."><Tag>starter template</Tag></Tooltip>
+            }
           </Space>
           <Paragraph type="secondary" style={{marginTop: 8, marginBottom: 8, maxWidth: 900}}>
-            {policySet.description}
+            Your own policy set: what you are entitled to do through <em>any</em> AI agent, as a Casbin model, policy and
+            example requests. It is stored in your Casdoor user&apos;s properties, so it follows you to every machine AIGuard
+            guards. Fuse it with an agent&apos;s policy set on the Policy Fusion page to see what the two allow together.
           </Paragraph>
           <Space wrap size={4}>
-            {policySet.agent && <Tag color="blue" style={{margin: 0}}>{policySet.agent}</Tag>}
-            {policySet.os && <Tag color="geekblue" style={{margin: 0}}>{policySet.os}</Tag>}
-            {(policySet.tags || []).map((tag) => <Tag key={tag} style={{margin: 0}}>{tag}</Tag>)}
+            <Tag color="geekblue" style={{margin: 0, fontFamily: editorStyle.fontFamily}}>sub = {policySet.subject}</Tag>
+            <Tag style={{margin: 0}}>{policySet.owner}</Tag>
           </Space>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => reset(policySet)}>Reset changes</Button>
+        <Space>
+          <Button icon={<MergeCellsOutlined />} onClick={() => history.push("/policy-fusion")}>Fuse with an agent</Button>
+          <Button icon={<ReloadOutlined />} disabled={!dirty} onClick={() => reset(policySet)}>Reset changes</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!dirty} onClick={save}>Save</Button>
+        </Space>
       </div>
 
       <Row gutter={[16, 16]} style={{marginTop: 20}}>

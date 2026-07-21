@@ -95,6 +95,17 @@ export function setPolicySetEnabled(name, enabled) {
   return request("/api/policy-set/enable", {method: "POST", body: JSON.stringify({name, enabled})});
 }
 
+// The signed-in person's own policy set, stored in their Casdoor user's
+// properties rather than on this host. Requires being signed in - unlike the
+// rest of aiguard, an anonymous session has no digital employee to show.
+export function getEmployeePolicySet() {
+  return request("/api/employee-policy-set");
+}
+
+export function updateEmployeePolicySet(policySet) {
+  return request("/api/employee-policy-set", {method: "POST", body: JSON.stringify(policySet)});
+}
+
 export function getSettings() {
   return request("/api/settings");
 }

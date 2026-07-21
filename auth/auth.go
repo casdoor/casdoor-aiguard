@@ -178,3 +178,18 @@ func ParseJwtToken(token string) (*Claims, error) {
 func GetUser(name string) (*User, error) {
 	return casdoorsdk.GetUser(name)
 }
+
+// UpdateUserProperties writes back only the user's "properties" column, so
+// saving something aiguard owns (a digital employee's policy set) can never
+// overwrite a field of the user that Casdoor, or another client, changed in
+// the meantime.
+func UpdateUserProperties(user *User) error {
+	affected, err := casdoorsdk.UpdateUserForColumns(user, []string{"properties"})
+	if err != nil {
+		return err
+	}
+	if !affected {
+		return fmt.Errorf("casdoor did not accept the update of the user %q", user.Name)
+	}
+	return nil
+}

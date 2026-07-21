@@ -14,11 +14,13 @@
 
 import React, {useCallback, useEffect, useState} from "react";
 import {Layout, Menu, Tag, Tooltip} from "antd";
-import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined, DesktopOutlined} from "@ant-design/icons";
+import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined, DesktopOutlined, IdcardOutlined, MergeCellsOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import PolicyHubPage from "./pages/PolicyHubPage";
 import PolicySetPage from "./pages/PolicySetPage";
+import DigitalEmployeePage from "./pages/DigitalEmployeePage";
+import PolicyFusionPage from "./pages/PolicyFusionPage";
 import InterceptPage from "./pages/InterceptPage";
 import CasdoorSettingsPage from "./pages/CasdoorSettingsPage";
 import AgentsPage from "./pages/AgentsPage";
@@ -37,6 +39,8 @@ const menuItems = [
   {key: "/agents", icon: <RobotOutlined />, label: <Link to="/agents">Agents</Link>},
   {key: "/records", icon: <FileTextOutlined />, label: <Link to="/records">Records</Link>},
   {key: "/policyhub", icon: <SafetyCertificateOutlined />, label: <Link to="/policyhub">Policy Hub</Link>},
+  {key: "/digital-employee", icon: <IdcardOutlined />, label: <Link to="/digital-employee">Digital Employee</Link>},
+  {key: "/policy-fusion", icon: <MergeCellsOutlined />, label: <Link to="/policy-fusion">Policy Fusion</Link>},
   {key: "/intercept", icon: <ApiOutlined />, label: <Link to="/intercept">Interception</Link>},
   {key: "/casdoor", icon: <SettingOutlined />, label: <Link to="/casdoor">Settings</Link>},
 ];
@@ -125,6 +129,8 @@ function App() {
                 <Route exact path="/records" component={RecordsPage} />
                 <Route exact path="/policyhub" component={PolicyHubPage} />
                 <Route exact path="/policyhub/:name" component={PolicySetPage} />
+                <Route exact path="/digital-employee" render={() => <DigitalEmployeePage account={account} />} />
+                <Route exact path="/policy-fusion" render={() => <PolicyFusionPage account={account} />} />
                 <Route exact path="/intercept" component={InterceptPage} />
                 <Route exact path="/casdoor" component={CasdoorSettingsPage} />
                 <Route exact path="/callback" render={() => <AuthCallback onSignedIn={onSignedIn} />} />

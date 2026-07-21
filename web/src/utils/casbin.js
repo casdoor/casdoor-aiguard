@@ -66,14 +66,23 @@ function toObject(text) {
   return new Function(`return (${text});`)();
 }
 
+// newPolicyEnforcer builds the enforcer one policy set runs on. Callers that
+// evaluate several sets against the same requests - policy fusion does - build
+// one enforcer per set and keep it for every line, rather than recompiling the
+// model for each.
+export async function newPolicyEnforcer({model, policy}) {
+  const enforcer = await newEnforcer(newModel(model), (policy || "").trim() ? new StringAdapter(policy) : undefined);
+  if (!enforcer.getRoleManager()) {
+    enforcer.setRoleManager(new DefaultRoleManager(10));
+  }
+  return enforcer;
+}
+
 // enforce evaluates every non-empty request line against the model and policy,
 // returning one row per line: the request, whether it was allowed, and the
 // policy rule that decided it (empty when nothing matched).
 export async function enforce({model, policy, request}) {
-  const enforcer = await newEnforcer(newModel(model), policy.trim() ? new StringAdapter(policy) : undefined);
-  if (!enforcer.getRoleManager()) {
-    enforcer.setRoleManager(new DefaultRoleManager(10));
-  }
+  const enforcer = await newPolicyEnforcer({model, policy});
 
   const lines = (request || "").split("\n").filter((line) => line.trim() !== "");
 
