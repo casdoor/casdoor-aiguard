@@ -27,41 +27,46 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const claudeDesktopPackageFamily = "Claude_pzs8sxrjxfjjc"
-
 var (
 	kernel32                   = windows.NewLazySystemDLL("kernel32.dll")
 	getPackagesByPackageFamily = kernel32.NewProc("GetPackagesByPackageFamily")
 	getPackagePathByFullName   = kernel32.NewProc("GetPackagePathByFullName")
 )
 
-func scanWindowsDesktop(homes []windowsHome) []Installation {
-	result := scanClaudeDesktopMSIX()
+// scanWindowsDesktop covers the two ways a desktop app ships on Windows: as an
+// MSIX package registered with the OS, or as a per-user standalone installer.
+func scanWindowsDesktop(fingerprint *compiledFingerprint, homes []homeDir) []Installation {
+	result := scanMSIX(fingerprint)
 	for _, home := range homes {
-		result = append(result, scanClaudeDesktopInstaller(home)...)
+		result = append(result, scanDesktopInstaller(fingerprint, home)...)
 	}
 	return result
 }
 
-func scanClaudeDesktopInstaller(home windowsHome) []Installation {
-	localAppData := filepath.Join(home.path, "AppData", "Local")
-	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
-		if configured := os.Getenv("LOCALAPPDATA"); configured != "" {
-			localAppData = configured
-		}
+func scanDesktopInstaller(fingerprint *compiledFingerprint, home homeDir) []Installation {
+	if fingerprint.DesktopInstallerDir == "" || fingerprint.ExecName == "" {
+		return nil
 	}
-	executable := filepath.Join(localAppData, "AnthropicClaude", "claude.exe")
+
+	executable := filepath.Join(localAppData(home), fingerprint.DesktopInstallerDir, fingerprint.ExecName+".exe")
 	if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
 		return nil
 	}
-	return []Installation{{Name: "Claude Desktop", Path: executable, InstallMethod: "desktop-installer", Owner: home.owner}}
+	return []Installation{{
+		Name: fingerprint.DisplayName, Path: executable,
+		InstallMethod: "desktop-installer", Owner: home.owner,
+	}}
 }
 
-func scanClaudeDesktopMSIX() []Installation {
-	fullNames := packageFullNames(claudeDesktopPackageFamily)
+func scanMSIX(fingerprint *compiledFingerprint) []Installation {
+	if fingerprint.MSIXFamily == "" || fingerprint.ExecName == "" {
+		return nil
+	}
+	fullNames := packageFullNames(fingerprint.MSIXFamily)
 	if len(fullNames) == 0 {
 		return nil
 	}
+
 	owner := ""
 	if account, err := user.Current(); err == nil {
 		owner = account.Username
@@ -72,17 +77,18 @@ func scanClaudeDesktopMSIX() []Installation {
 		if root == "" {
 			continue
 		}
-		executable := filepath.Join(root, "app", "claude.exe")
+		executable := filepath.Join(root, "app", fingerprint.ExecName+".exe")
 		if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		fields := strings.Split(fullName, "_")
+		// A package full name is "<Name>_<Version>_<Arch>_<...>_<PublisherId>".
 		version := ""
-		if len(fields) > 1 {
+		if fields := strings.Split(fullName, "_"); len(fields) > 1 {
 			version = fields[1]
 		}
 		result = append(result, Installation{
-			Name: "Claude Desktop", Version: version, Path: executable, InstallMethod: "msix", Owner: owner,
+			Name: fingerprint.DisplayName, Version: version, Path: executable,
+			InstallMethod: "msix", Owner: owner,
 		})
 	}
 	return result

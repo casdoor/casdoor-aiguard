@@ -15,12 +15,10 @@
 // Package agent discovers AI agents installed on the host and identifies
 // running agent executables. Discovery is intentionally bounded to known,
 // verifiable installation layouts rather than walking the whole filesystem.
+// Which agents are recognized, and by what paths and command lines, is data:
+// see fingerprint.go. The scanners here and in scan_<platform>.go hold only the
+// logic shared by every agent.
 package agent
-
-import (
-	"path/filepath"
-	"strings"
-)
 
 // Installation describes one AI agent installation found on the host.
 type Installation struct {
@@ -29,31 +27,4 @@ type Installation struct {
 	Path          string `json:"path"`
 	InstallMethod string `json:"installMethod"`
 	Owner         string `json:"owner"`
-}
-
-// IdentifyExecutable returns the agent name for a known executable layout.
-// On Linux, the caller should pass the resolved /proc/<pid>/exe path.
-func IdentifyExecutable(path string) string {
-	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
-	if strings.HasSuffix(path, "/appdata/local/anthropicclaude/claude.exe") ||
-		(strings.Contains(path, "/appdata/local/anthropicclaude/app-") && strings.HasSuffix(path, "/claude.exe")) ||
-		(strings.Contains(path, "/program files/windowsapps/claude_") && strings.Contains(path, "__pzs8sxrjxfjjc/app/claude.exe")) {
-		return "claude-desktop"
-	}
-	if strings.Contains(path, "/.local/share/claude/versions/") ||
-		strings.HasSuffix(path, "/.local/bin/claude") || strings.HasSuffix(path, "/.local/bin/claude.exe") ||
-		strings.Contains(path, "/caskroom/claude-code/") ||
-		strings.Contains(path, "/caskroom/claude-code@latest/") ||
-		strings.Contains(path, "/microsoft/winget/packages/anthropic.claudecode_") ||
-		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code/") ||
-		strings.Contains(path, "/node_modules/@anthropic-ai/claude-code-") {
-		return "claude-code"
-	}
-
-	switch path {
-	case "/usr/bin/claude", "/usr/local/bin/claude",
-		"/home/linuxbrew/.linuxbrew/bin/claude", "/opt/homebrew/bin/claude":
-		return "claude-code"
-	}
-	return ""
 }

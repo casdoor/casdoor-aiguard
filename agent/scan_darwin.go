@@ -17,57 +17,33 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
-	"syscall"
 )
 
-type darwinHome struct {
-	owner string
-	path  string
-}
-
-// Scan finds supported Claude Code installations in known macOS layouts.
-// It neither executes discovered binaries nor walks arbitrary filesystem roots.
+// Scan finds installations of every known agent in known macOS layouts. It
+// neither executes discovered binaries nor walks arbitrary filesystem roots.
 func Scan() []Installation {
 	homes := darwinHomes()
-	var installations []Installation
-	for _, home := range homes {
-		installations = append(installations, scanDarwinNative(home)...)
-		installations = append(installations, scanDarwinNpm(home)...)
-	}
-	for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
-		installations = append(installations, scanDarwinHomebrew(prefix)...)
-	}
-	installations = append(installations, scanDarwinSystemNpm()...)
 
-	seen := map[string]bool{}
-	result := installations[:0]
-	for _, installation := range installations {
-		key := darwinCanonicalPath(installation.Path)
-		if key == "" || seen[key] {
-			continue
+	var installations []Installation
+	for _, fingerprint := range compiledFingerprints {
+		for _, home := range homes {
+			installations = append(installations, scanNative(fingerprint, home)...)
+			installations = append(installations, scanNpmPatterns(fingerprint, userNpmPatterns(fingerprint, home.path), home.owner, fileOwner)...)
 		}
-		seen[key] = true
-		result = append(result, installation)
+		for _, prefix := range []string{"/opt/homebrew", "/usr/local"} {
+			installations = append(installations, scanDarwinHomebrew(fingerprint, prefix)...)
+			installations = append(installations, scanDarwinSystemNpm(fingerprint, prefix)...)
+		}
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Owner != result[j].Owner {
-			return result[i].Owner < result[j].Owner
-		}
-		return result[i].Path < result[j].Path
-	})
-	return result
+	return dedupeInstallations(installations)
 }
 
-func darwinHomes() []darwinHome {
+func darwinHomes() []homeDir {
 	seen := map[string]bool{}
-	var homes []darwinHome
+	var homes []homeDir
 	add := func(owner, path string) {
 		path = filepath.Clean(path)
 		if info, err := os.Stat(path); err != nil || !info.IsDir() || seen[path] {
@@ -77,7 +53,7 @@ func darwinHomes() []darwinHome {
 		if owner == "" {
 			owner = filepath.Base(path)
 		}
-		homes = append(homes, darwinHome{owner: owner, path: path})
+		homes = append(homes, homeDir{owner: owner, path: path})
 	}
 
 	if entries, err := os.ReadDir("/Users"); err == nil {
@@ -98,109 +74,32 @@ func darwinHomes() []darwinHome {
 	return homes
 }
 
-func scanDarwinNative(home darwinHome) []Installation {
-	launcher := filepath.Join(home.path, ".local", "bin", "claude")
-	info, err := os.Stat(launcher)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+// scanDarwinHomebrew reads the Caskroom layout directly; on macOS every cask
+// version keeps its own directory, so no brew invocation is needed.
+func scanDarwinHomebrew(fingerprint *compiledFingerprint, prefix string) []Installation {
+	if fingerprint.ExecName == "" {
 		return nil
 	}
 
-	version := ""
-	if target, err := filepath.EvalSymlinks(launcher); err == nil {
-		versionsDir := filepath.Join(home.path, ".local", "share", "claude", "versions")
-		if relative, err := filepath.Rel(versionsDir, target); err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			version = strings.Split(relative, string(filepath.Separator))[0]
-		}
-	}
-	return []Installation{{Name: "Claude Code", Version: version, Path: launcher, InstallMethod: "native", Owner: home.owner}}
-}
-
-func scanDarwinHomebrew(prefix string) []Installation {
 	var result []Installation
-	for _, cask := range []string{"claude-code", "claude-code@latest"} {
+	for _, cask := range fingerprint.HomebrewCasks {
 		versions, _ := filepath.Glob(filepath.Join(prefix, "Caskroom", cask, "*"))
 		for _, versionDir := range versions {
-			executable := filepath.Join(versionDir, "claude")
+			executable := filepath.Join(versionDir, fingerprint.ExecName)
 			info, err := os.Stat(executable)
 			if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
 				continue
 			}
 			result = append(result, Installation{
-				Name: "Claude Code", Version: filepath.Base(versionDir), Path: executable, InstallMethod: "homebrew", Owner: darwinFileOwner(executable),
+				Name: fingerprint.DisplayName, Version: filepath.Base(versionDir), Path: executable,
+				InstallMethod: "homebrew", Owner: fileOwner(executable),
 			})
 		}
 	}
 	return result
 }
 
-func scanDarwinNpm(home darwinHome) []Installation {
-	return scanDarwinNpmPatterns([]string{
-		filepath.Join(home.path, ".nvm", "versions", "node", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".local", "share", "fnm", "node-versions", "*", "installation", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(home.path, ".asdf", "installs", "nodejs", "*", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-	}, home.owner)
-}
-
-func scanDarwinSystemNpm() []Installation {
-	return scanDarwinNpmPatterns([]string{
-		"/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/package.json",
-		"/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json",
-	}, "")
-}
-
-func scanDarwinNpmPatterns(patterns []string, owner string) []Installation {
-	var result []Installation
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(pattern)
-		for _, packageJSON := range matches {
-			info, err := os.Stat(packageJSON)
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
-				continue
-			}
-			data, err := os.ReadFile(packageJSON)
-			if err != nil {
-				continue
-			}
-			var pkg struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(data, &pkg) != nil || pkg.Name != "@anthropic-ai/claude-code" || pkg.Version == "" {
-				continue
-			}
-			packageOwner := owner
-			if packageOwner == "" {
-				packageOwner = darwinFileOwner(packageJSON)
-			}
-			result = append(result, Installation{
-				Name: "Claude Code", Version: pkg.Version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: packageOwner,
-			})
-		}
-	}
-	return result
-}
-
-func darwinCanonicalPath(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
-	}
-	return filepath.Clean(path)
-}
-
-func darwinFileOwner(path string) string {
-	info, err := os.Stat(path)
-	if err != nil {
-		return "root"
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "root"
-	}
-	id := strconv.FormatUint(uint64(stat.Uid), 10)
-	account, err := user.LookupId(id)
-	if err != nil {
-		return id
-	}
-	return account.Username
+func scanDarwinSystemNpm(fingerprint *compiledFingerprint, prefix string) []Installation {
+	pattern := filepath.Join(prefix, "lib", "node_modules", fingerprint.npmPackagePath(), "package.json")
+	return scanNpmPatterns(fingerprint, []string{pattern}, "", fileOwner)
 }

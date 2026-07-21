@@ -17,56 +17,41 @@
 package agent
 
 import (
-	"encoding/json"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
 )
 
-type windowsHome struct {
+// homeDir is one user's profile directory and the account that owns it.
+type homeDir struct {
 	owner string
 	path  string
 }
 
-// Scan finds supported Claude Code installations in known Windows layouts.
-// It neither executes discovered binaries nor walks arbitrary filesystem roots.
+// Scan finds installations of every known agent in known Windows layouts. It
+// neither executes discovered binaries nor walks arbitrary filesystem roots.
 func Scan() []Installation {
 	homes := windowsHomes()
-	var installations []Installation
-	for _, home := range homes {
-		installations = append(installations, scanWindowsNative(home)...)
-		installations = append(installations, scanWindowsWinget(home)...)
-		installations = append(installations, scanWindowsNpm(home)...)
-	}
-	installations = append(installations, scanWindowsDesktop(homes)...)
-	installations = append(installations, scanMachineWinget()...)
 
-	seen := map[string]bool{}
-	result := installations[:0]
-	for _, installation := range installations {
-		key := strings.ToLower(windowsCanonicalPath(installation.Path))
-		if key == "" || seen[key] {
-			continue
+	var installations []Installation
+	for _, fingerprint := range compiledFingerprints {
+		for _, home := range homes {
+			installations = append(installations, scanWindowsNative(fingerprint, home)...)
+			installations = append(installations, scanWindowsWinget(fingerprint, home)...)
+			installations = append(installations, scanWindowsNpm(fingerprint, home)...)
 		}
-		seen[key] = true
-		result = append(result, installation)
+		installations = append(installations, scanWindowsDesktop(fingerprint, homes)...)
+		installations = append(installations, scanMachineWinget(fingerprint)...)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Owner != result[j].Owner {
-			return result[i].Owner < result[j].Owner
-		}
-		return result[i].Path < result[j].Path
-	})
-	return result
+	return dedupeInstallations(installations)
 }
 
-func windowsHomes() []windowsHome {
+func windowsHomes() []homeDir {
 	seen := map[string]bool{}
-	var homes []windowsHome
+	var homes []homeDir
 	add := func(owner, path string) {
 		path = filepath.Clean(path)
 		if info, err := os.Stat(path); err != nil || !info.IsDir() {
@@ -80,7 +65,7 @@ func windowsHomes() []windowsHome {
 		if owner == "" {
 			owner = filepath.Base(path)
 		}
-		homes = append(homes, windowsHome{owner: owner, path: path})
+		homes = append(homes, homeDir{owner: owner, path: path})
 	}
 
 	const profileList = `SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList`
@@ -120,20 +105,41 @@ func windowsHomes() []windowsHome {
 	return homes
 }
 
-func scanWindowsNative(home windowsHome) []Installation {
-	launcher := filepath.Join(home.path, ".local", "bin", "claude.exe")
+// appDataDir resolves one of a profile's AppData subdirectories. For the
+// current user it prefers the environment variable, which respects a relocated
+// profile; for other users only the conventional layout is available.
+func appDataDir(home homeDir, kind, variable string) string {
+	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
+		if configured := os.Getenv(variable); configured != "" {
+			return configured
+		}
+	}
+	return filepath.Join(home.path, "AppData", kind)
+}
+
+func localAppData(home homeDir) string   { return appDataDir(home, "Local", "LOCALAPPDATA") }
+func roamingAppData(home homeDir) string { return appDataDir(home, "Roaming", "APPDATA") }
+
+// scanWindowsNative reports the per-user native installer layout: a launcher at
+// %USERPROFILE%\.local\bin\<exec>.exe backed by a versioned payload directory.
+func scanWindowsNative(fingerprint *compiledFingerprint, home homeDir) []Installation {
+	if fingerprint.ExecName == "" || fingerprint.StateDir == "" {
+		return nil
+	}
+
+	launcher := filepath.Join(home.path, ".local", "bin", fingerprint.ExecName+".exe")
 	launcherInfo, err := os.Stat(launcher)
 	if err != nil || !launcherInfo.Mode().IsRegular() {
 		return nil
 	}
 
 	version := ""
-	versionsDir := filepath.Join(home.path, ".local", "share", "claude", "versions")
+	versionsDir := filepath.Join(home.path, ".local", "share", fingerprint.StateDir, "versions")
 	if target, err := filepath.EvalSymlinks(launcher); err == nil {
-		if relative, err := filepath.Rel(versionsDir, target); err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			version = strings.Split(relative, string(filepath.Separator))[0]
-		}
+		version = versionUnderDir(versionsDir, target)
 	}
+	// Windows installs may hard-link rather than symlink the launcher, in which
+	// case the version is only recoverable by identity against the payloads.
 	if version == "" {
 		if entries, err := os.ReadDir(versionsDir); err == nil {
 			for _, entry := range entries {
@@ -145,25 +151,22 @@ func scanWindowsNative(home windowsHome) []Installation {
 			}
 		}
 	}
-	return []Installation{{Name: "Claude Code", Version: version, Path: launcher, InstallMethod: "native", Owner: home.owner}}
+	return []Installation{{
+		Name: fingerprint.DisplayName, Version: version, Path: launcher,
+		InstallMethod: "native", Owner: home.owner,
+	}}
 }
 
-func scanWindowsWinget(home windowsHome) []Installation {
-	localAppData := filepath.Join(home.path, "AppData", "Local")
-	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
-		if configured := os.Getenv("LOCALAPPDATA"); configured != "" {
-			localAppData = configured
-		}
-	}
-	root := filepath.Join(localAppData, "Microsoft", "WinGet", "Packages")
-	return scanWingetPackages(root, home.owner)
+func scanWindowsWinget(fingerprint *compiledFingerprint, home homeDir) []Installation {
+	root := filepath.Join(localAppData(home), "Microsoft", "WinGet", "Packages")
+	return scanWingetPackages(fingerprint, root, home.owner)
 }
 
-func scanMachineWinget() []Installation {
+func scanMachineWinget(fingerprint *compiledFingerprint) []Installation {
 	var result []Installation
 	seen := map[string]bool{}
-	for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
-		base := os.Getenv(env)
+	for _, variable := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+		base := os.Getenv(variable)
 		if base == "" {
 			continue
 		}
@@ -173,72 +176,39 @@ func scanMachineWinget() []Installation {
 			continue
 		}
 		seen[key] = true
-		result = append(result, scanWingetPackages(root, "SYSTEM")...)
+		result = append(result, scanWingetPackages(fingerprint, root, "SYSTEM")...)
 	}
 	return result
 }
 
-func scanWingetPackages(root, owner string) []Installation {
-	packages, _ := filepath.Glob(filepath.Join(root, "Anthropic.ClaudeCode_*"))
+func scanWingetPackages(fingerprint *compiledFingerprint, root, owner string) []Installation {
+	if fingerprint.WingetPackage == "" || fingerprint.ExecName == "" {
+		return nil
+	}
+
+	// winget appends an install-source hash to the package identifier.
+	packages, _ := filepath.Glob(filepath.Join(root, fingerprint.WingetPackage+"_*"))
 	var result []Installation
 	for _, packageDir := range packages {
-		executable := filepath.Join(packageDir, "claude.exe")
+		executable := filepath.Join(packageDir, fingerprint.ExecName+".exe")
 		if info, err := os.Stat(executable); err == nil && info.Mode().IsRegular() {
-			result = append(result, Installation{Name: "Claude Code", Path: executable, InstallMethod: "winget", Owner: owner})
+			result = append(result, Installation{
+				Name: fingerprint.DisplayName, Path: executable,
+				InstallMethod: "winget", Owner: owner,
+			})
 		}
 	}
 	return result
 }
 
-func scanWindowsNpm(home windowsHome) []Installation {
-	roaming := filepath.Join(home.path, "AppData", "Roaming")
-	local := filepath.Join(home.path, "AppData", "Local")
-	if current, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
-		if configured := os.Getenv("APPDATA"); configured != "" {
-			roaming = configured
-		}
-		if configured := os.Getenv("LOCALAPPDATA"); configured != "" {
-			local = configured
-		}
-	}
+func scanWindowsNpm(fingerprint *compiledFingerprint, home homeDir) []Installation {
+	roaming := roamingAppData(home)
+	pkg := fingerprint.npmPackagePath()
 	patterns := []string{
-		filepath.Join(roaming, "npm", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(roaming, "nvm", "*", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(roaming, "fnm", "node-versions", "*", "installation", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
-		filepath.Join(local, "Volta", "tools", "image", "packages", "@anthropic-ai", "claude-code", "lib", "node_modules", "@anthropic-ai", "claude-code", "package.json"),
+		filepath.Join(roaming, "npm", "node_modules", pkg, "package.json"),
+		filepath.Join(roaming, "nvm", "*", "node_modules", pkg, "package.json"),
+		filepath.Join(roaming, "fnm", "node-versions", "*", "installation", "node_modules", pkg, "package.json"),
+		filepath.Join(localAppData(home), "Volta", "tools", "image", "packages", pkg, "lib", "node_modules", pkg, "package.json"),
 	}
-	return scanWindowsNpmPatterns(patterns, home.owner)
-}
-
-func scanWindowsNpmPatterns(patterns []string, owner string) []Installation {
-	var result []Installation
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(pattern)
-		for _, packageJSON := range matches {
-			info, err := os.Stat(packageJSON)
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
-				continue
-			}
-			data, err := os.ReadFile(packageJSON)
-			if err != nil {
-				continue
-			}
-			var pkg struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			}
-			if json.Unmarshal(data, &pkg) != nil || pkg.Name != "@anthropic-ai/claude-code" || pkg.Version == "" {
-				continue
-			}
-			result = append(result, Installation{Name: "Claude Code", Version: pkg.Version, Path: filepath.Dir(packageJSON), InstallMethod: "npm", Owner: owner})
-		}
-	}
-	return result
-}
-
-func windowsCanonicalPath(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
-	}
-	return filepath.Clean(path)
+	return scanNpmPatterns(fingerprint, patterns, home.owner, nil)
 }

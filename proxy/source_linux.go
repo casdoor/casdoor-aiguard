@@ -54,37 +54,21 @@ func LookupSourceProcess(localAddr net.Addr) (pid int, name string, agent string
 	return pid, name, agent
 }
 
-// knownAgents maps a friendly agent name to substrings that identify it in a
-// process command line. Runtimes like Node.js report a generic comm ("node"),
-// so the actual agent (e.g. openclaw) is only visible in the argv/script path.
-var knownAgents = []struct {
-	name    string
-	markers []string
-}{
-	{"openclaw", []string{"openclaw"}},
-}
-
 // maxAgentParentWalk bounds how far up the process tree identifyAgent looks.
 // The outbound LLM call can come from a forked worker whose own argv is just
 // "node", while the marker lives in an ancestor (the openclaw gateway).
 const maxAgentParentWalk = 8
 
-// identifyAgent walks the process and its ancestors, matching each command line
-// against knownAgents, and returns the recognized agent name ("" if none).
+// identifyAgent walks the process and its ancestors, matching each executable
+// path and command line against the agent fingerprints, and returns the
+// recognized agent ID ("" if none).
 func identifyAgent(pid int) string {
 	for i := 0; i < maxAgentParentWalk && pid > 1; i++ {
 		if name := agent.IdentifyExecutable(readProcessExecutable(pid)); name != "" {
 			return name
 		}
-		cmdline := strings.ToLower(readProcessCmdline(pid))
-		if cmdline != "" {
-			for _, a := range knownAgents {
-				for _, m := range a.markers {
-					if strings.Contains(cmdline, m) {
-						return a.name
-					}
-				}
-			}
+		if name := agent.IdentifyCmdline(readProcessCmdline(pid)); name != "" {
+			return name
 		}
 		ppid := readParentPid(pid)
 		if ppid == pid || ppid == 0 {
