@@ -21,7 +21,11 @@ import (
 
 func InitAPI() {
 	web.Router("/api/agents", &controllers.ApiController{}, "GET:GetAgents")
+	web.Router("/api/agents/patch", &controllers.ApiController{}, "POST:PatchAgent")
+	web.Router("/api/agents/unpatch", &controllers.ApiController{}, "POST:UnpatchAgent")
 	web.Router("/api/events", &controllers.ApiController{}, "GET:GetEvents")
+	web.Router("/api/records", &controllers.ApiController{}, "GET:GetRecords")
+	web.Router("/api/records", &controllers.ApiController{}, "POST:AddRecord")
 	web.Router("/api/policy", &controllers.ApiController{}, "GET:GetPolicy")
 	web.Router("/api/policy", &controllers.ApiController{}, "POST:UpdatePolicy")
 	web.Router("/api/settings", &controllers.ApiController{}, "GET:GetSettings")

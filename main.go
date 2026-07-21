@@ -38,6 +38,9 @@ func main() {
 	if err := object.InitAuditLog(); err != nil {
 		panic(err)
 	}
+	if err := object.InitRecordLog(); err != nil {
+		panic(err)
+	}
 
 	ca, err := proxy.LoadOrCreateCA()
 	if err != nil {

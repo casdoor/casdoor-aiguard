@@ -32,6 +32,7 @@ func Scan() []Installation {
 
 	var installations []Installation
 	for _, fingerprint := range compiledFingerprints {
+		mark := len(installations)
 		for _, home := range homes {
 			installations = append(installations, scanNative(fingerprint, home)...)
 			installations = append(installations, scanNpmPatterns(fingerprint, userNpmPatterns(fingerprint, home.path), home.owner, fileOwner)...)
@@ -39,6 +40,7 @@ func Scan() []Installation {
 		installations = append(installations, scanSystemNpm(fingerprint)...)
 		installations = append(installations, scanSystemPackages(fingerprint)...)
 		installations = append(installations, scanHomebrew(fingerprint)...)
+		stampAgentId(installations, mark, fingerprint.ID)
 	}
 	return dedupeInstallations(installations)
 }

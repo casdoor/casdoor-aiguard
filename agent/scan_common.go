@@ -73,6 +73,16 @@ func (f *compiledFingerprint) npmPackagePath() string {
 	return filepath.FromSlash(f.NpmPackage)
 }
 
+// stampAgentId labels every installation appended since mark with the id of the
+// fingerprint that produced it. Stamping once per fingerprint keeps the dozen
+// construction sites spread across the platform scanners from each having to
+// remember the field.
+func stampAgentId(installations []Installation, mark int, agentId string) {
+	for i := mark; i < len(installations); i++ {
+		installations[i].AgentId = agentId
+	}
+}
+
 // dedupeInstallations drops installations that resolve to the same executable
 // and returns the rest ordered by owner then path. The result is never nil, so
 // the API reports an empty list rather than null.

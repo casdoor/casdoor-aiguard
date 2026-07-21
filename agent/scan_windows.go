@@ -38,6 +38,7 @@ func Scan() []Installation {
 
 	var installations []Installation
 	for _, fingerprint := range compiledFingerprints {
+		mark := len(installations)
 		for _, home := range homes {
 			installations = append(installations, scanWindowsNative(fingerprint, home)...)
 			installations = append(installations, scanWindowsWinget(fingerprint, home)...)
@@ -45,6 +46,7 @@ func Scan() []Installation {
 		}
 		installations = append(installations, scanWindowsDesktop(fingerprint, homes)...)
 		installations = append(installations, scanMachineWinget(fingerprint)...)
+		stampAgentId(installations, mark, fingerprint.ID)
 	}
 	return dedupeInstallations(installations)
 }

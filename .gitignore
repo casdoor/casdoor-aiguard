@@ -41,3 +41,4 @@ logs/
 lastupdate.tmp
 commentsRouter*.go
 
+data/

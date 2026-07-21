@@ -15,6 +15,7 @@
 package conf
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
@@ -108,6 +109,40 @@ func GetAuditLogFile() string {
 		file = "./logs/audit.log"
 	}
 	return file
+}
+
+// GetRecordLogFile is the append-only log of behaviour records reported by
+// patched agents, the counterpart to the intercepted-traffic audit log.
+func GetRecordLogFile() string {
+	file := GetConfigString("recordLogFile")
+	if file == "" {
+		file = "./logs/record.log"
+	}
+	return file
+}
+
+// GetPatchStateDir holds what aiguard needs to undo a patch: one manifest per
+// patched agent plus the backups of every file the patch overwrote. Losing it
+// means losing the ability to unpatch cleanly.
+func GetPatchStateDir() string {
+	dir := GetConfigString("patchStateDir")
+	if dir == "" {
+		dir = "./data/patches"
+	}
+	return dir
+}
+
+// GetRecordsIngestUrl is the endpoint aiguard bakes into the hooks it installs
+// into agents. It defaults to this process's own management API on the loopback
+// address, which is right whenever the agent runs alongside aiguard; an agent
+// inside a container or WSL reaches the host by another address, so configure it
+// explicitly there.
+func GetRecordsIngestUrl() string {
+	url := GetConfigString("recordsIngestUrl")
+	if url == "" {
+		url = fmt.Sprintf("http://127.0.0.1:%d/api/records", GetConfigInt("httpport", 9000))
+	}
+	return url
 }
 
 // FailClosedOnPdpError controls behavior for recognized sensitive operations

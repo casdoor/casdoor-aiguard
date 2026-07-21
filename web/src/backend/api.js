@@ -32,6 +32,19 @@ export function getAgents() {
   return request("/api/agents");
 }
 
+// target is {agentId, path, owner}, straight from a row of the agents table.
+export function patchAgent(target) {
+  return request("/api/agents/patch", {method: "POST", body: JSON.stringify(target)});
+}
+
+export function unpatchAgent(target) {
+  return request("/api/agents/unpatch", {method: "POST", body: JSON.stringify(target)});
+}
+
+export function getRecords(agent = "", limit = 200) {
+  return request(`/api/records?agent=${encodeURIComponent(agent)}&limit=${limit}`);
+}
+
 export function getPolicy() {
   return request("/api/policy");
 }

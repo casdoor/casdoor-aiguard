@@ -20,8 +20,12 @@
 // logic shared by every agent.
 package agent
 
-// Installation describes one AI agent installation found on the host.
+// Installation describes one AI agent installation found on the host. AgentId
+// is the fingerprint that matched, so callers that act on an installation - the
+// patch package instrumenting it, for one - can tell which agent they are
+// looking at without re-matching the display name.
 type Installation struct {
+	AgentId       string `json:"agentId"`
 	Name          string `json:"name"`
 	Version       string `json:"version,omitempty"`
 	Path          string `json:"path"`

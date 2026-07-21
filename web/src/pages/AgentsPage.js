@@ -13,16 +13,21 @@
 // limitations under the License.
 
 import React, {useEffect, useState} from "react";
-import {Alert, Button, Space, Table, Tag, Typography} from "antd";
+import {Alert, Button, Popconfirm, Space, Table, Tag, Tooltip, Typography, message} from "antd";
 import {ReloadOutlined} from "@ant-design/icons";
-import {getAgents} from "../backend/api";
+import {Link} from "react-router-dom";
+import {getAgents, patchAgent, unpatchAgent} from "../backend/api";
 
 const {Title, Text} = Typography;
+
+const rowKey = (record) => `${record.owner}:${record.path}`;
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // The key of the row whose patch is in flight, so only its button spins.
+  const [busyKey, setBusyKey] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -35,12 +40,63 @@ export default function AgentsPage() {
 
   useEffect(load, []);
 
+  const togglePatch = (record) => {
+    const patched = record.patched;
+    const target = {agentId: record.agentId, path: record.path, owner: record.owner};
+
+    setBusyKey(rowKey(record));
+    (patched ? unpatchAgent(target) : patchAgent(target))
+      .then(() => {
+        message.success(patched ? `Unpatched ${record.name}` : `Patched ${record.name}`);
+        load();
+      })
+      .catch((err) => message.error(err.message))
+      .finally(() => setBusyKey(null));
+  };
+
+  const renderStatus = (_, record) => {
+    if (!record.supported) {
+      return <Tooltip title={record.detail}><Tag>Not supported</Tag></Tooltip>;
+    }
+    const tag = record.patched ? <Tag color="green">Patched</Tag> : <Tag color="default">Not patched</Tag>;
+    return record.detail ? <Tooltip title={record.detail}>{tag}</Tooltip> : tag;
+  };
+
+  const renderAction = (_, record) => {
+    if (!record.supported) {
+      return <Button size="small" disabled>Patch</Button>;
+    }
+
+    const button = (
+      <Button size="small" type={record.patched ? "default" : "primary"} loading={busyKey === rowKey(record)}>
+        {record.patched ? "Unpatch" : "Patch"}
+      </Button>
+    );
+    return (
+      <Popconfirm
+        title={record.patched ? `Unpatch ${record.name}?` : `Patch ${record.name}?`}
+        description={record.patched
+          ? "Removes aiguard's hooks and restores every file the patch changed."
+          : "Installs aiguard's hooks so this agent streams its behaviour to Records."}
+        okText={record.patched ? "Unpatch" : "Patch"}
+        onConfirm={() => togglePatch(record)}
+      >
+        {button}
+      </Popconfirm>
+    );
+  };
+
   const columns = [
     {title: "Agent", dataIndex: "name", key: "name"},
     {title: "Version", dataIndex: "version", key: "version", render: (value) => value || "Unknown"},
     {title: "Install Method", dataIndex: "installMethod", key: "installMethod", render: (value) => <Tag>{value}</Tag>},
     {title: "Owner", dataIndex: "owner", key: "owner"},
     {title: "Path", dataIndex: "path", key: "path", render: (value) => <Text code>{value}</Text>},
+    {title: "Patch Status", key: "patched", render: renderStatus},
+    {title: "Records", key: "records", render: (_, record) => (
+      record.patched ? <Link to={`/records?agent=${encodeURIComponent(record.agentId)}`}>View</Link> : null
+    )},
+    {title: "Action", key: "action", render: renderAction},
   ];
 
   return (
@@ -51,7 +107,7 @@ export default function AgentsPage() {
       </Space>
       {error && <Alert type="error" message={error} style={{marginBottom: 16}} />}
       <Table
-        rowKey={(record) => `${record.owner}:${record.path}`}
+        rowKey={rowKey}
         dataSource={agents}
         columns={columns}
         loading={loading}
