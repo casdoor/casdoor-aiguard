@@ -17,6 +17,7 @@ package object
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,13 @@ func TestEnforceForAgent(t *testing.T) {
 	}
 	if deny.PolicySet != "openclaw-test" {
 		t.Errorf("delete_file: deny attributed to %q, want openclaw-test", deny.PolicySet)
+	}
+
+	// The Records page shows this line as the block reason, so it has to name
+	// both the set that refused and what it refused.
+	reason := deny.Reason("127.0.0.1#delete_file", "mcp.tool_call")
+	if !strings.Contains(reason, "openclaw-test") || !strings.Contains(reason, "delete_file") {
+		t.Errorf("deny reason = %q, want it to name the set and the operation", reason)
 	}
 
 	if allow := EnforceForAgent("openclaw", "127.0.0.1#read_file", "mcp.tool_call"); !allow.Allowed {

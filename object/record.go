@@ -59,6 +59,14 @@ type Record struct {
 	// IsTriggered marks a record that matched a policy rule, mirroring
 	// Casdoor's field of the same name.
 	IsTriggered bool `json:"isTriggered"`
+
+	// The verdict, filled in by the /enforce path. PolicySet names the set that
+	// ruled on the operation and is empty when no set did - either because the
+	// record was only logged, or because nothing enabled applied to it. Reason
+	// explains a block in one line, and is empty for an allow.
+	PolicySet string `json:"policySet,omitempty"`
+	IsAllowed bool   `json:"isAllowed"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // normalize fills in the fields a reporting agent is not expected to supply and
@@ -78,6 +86,11 @@ func (r *Record) normalize() {
 		// Milliseconds, matching what the agents report: several events from one
 		// burst routinely share a second, and the Records page orders on this.
 		r.CreatedTime = time.Now().Format("2006-01-02T15:04:05.000Z07:00")
+	}
+	// Only the /enforce path rules on an operation. Everything else reaching the
+	// log is behaviour the agent already performed, so it counts as allowed.
+	if !r.IsTriggered {
+		r.IsAllowed = true
 	}
 	if len(r.Object) > maxRecordObjectBytes {
 		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"

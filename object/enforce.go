@@ -15,6 +15,7 @@
 package object
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -42,6 +43,20 @@ type Decision struct {
 	// block is traceable back to a single rule the way the Web UI's preview is.
 	PolicySet string   `json:"policySet,omitempty"`
 	Rule      []string `json:"rule,omitempty"`
+}
+
+// Reason renders a deny as one line an operator can read straight off the
+// Records page: what was refused, and which rule refused it. An allow needs no
+// explanation, so it has none.
+func (d Decision) Reason(obj, act string) string {
+	if d.Allowed {
+		return ""
+	}
+	reason := fmt.Sprintf("%s on %q denied by policy set %q", act, obj, d.PolicySet)
+	if len(d.Rule) > 0 {
+		reason += fmt.Sprintf(" (rule: %s)", strings.Join(d.Rule, ", "))
+	}
+	return reason
 }
 
 // compiledSet caches one set's enforcer alongside the model and policy text it

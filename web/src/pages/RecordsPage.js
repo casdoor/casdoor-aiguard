@@ -14,7 +14,7 @@
 
 import React, {useEffect, useState} from "react";
 import {Alert, Descriptions, Select, Space, Table, Tag, Typography} from "antd";
-import {useHistory, useLocation} from "react-router-dom";
+import {Link, useHistory, useLocation} from "react-router-dom";
 import {getAgents, getRecords} from "../backend/api";
 
 const {Title, Text} = Typography;
@@ -50,6 +50,12 @@ function RecordDetail({record}) {
       {record.sessionKey && <Descriptions.Item label="Session">{record.sessionKey}</Descriptions.Item>}
       {record.clientIp && <Descriptions.Item label="Reported from">{record.clientIp}</Descriptions.Item>}
       {record.detail && <Descriptions.Item label="Detail">{record.detail}</Descriptions.Item>}
+      {record.policySet && (
+        <Descriptions.Item label="Policy set">
+          <Link to={`/policyhub/${encodeURIComponent(record.policySet)}`}>{record.policySet}</Link>
+        </Descriptions.Item>
+      )}
+      {record.reason && <Descriptions.Item label="Reason">{record.reason}</Descriptions.Item>}
       {record.object && (
         <Descriptions.Item label="Payload">
           <pre style={codeBlockStyle}>{prettyObject(record.object)}</pre>
@@ -113,6 +119,28 @@ export default function RecordsPage() {
       dataIndex: "isTriggered",
       key: "isTriggered",
       render: (value) => (value ? <Tag color="red">yes</Tag> : null),
+    },
+    {
+      // Only a set that actually ruled on the operation is named, so this column
+      // stays empty for the records aiguard merely logged.
+      title: "Policy set",
+      dataIndex: "policySet",
+      key: "policySet",
+      ellipsis: true,
+      render: (value) => (value ? <Link to={`/policyhub/${encodeURIComponent(value)}`}>{value}</Link> : null),
+    },
+    {
+      title: "Allowed",
+      dataIndex: "isAllowed",
+      key: "isAllowed",
+      render: (value) => (value ? <Tag color="green">allowed</Tag> : <Tag color="red">blocked</Tag>),
+    },
+    {
+      title: "Reason",
+      dataIndex: "reason",
+      key: "reason",
+      ellipsis: true,
+      render: (value) => (value ? <Text type="danger">{value}</Text> : null),
     },
   ];
 

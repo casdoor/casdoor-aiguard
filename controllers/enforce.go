@@ -63,7 +63,12 @@ func (c *ApiController) Enforce() {
 
 	decision := object.EnforceForAgent(req.Agent, req.Resource, req.Intent)
 
+	// Carry the verdict onto the record, so the Records page shows which set
+	// ruled on the operation and why it was stopped, not just that it was.
 	record := req.Record
+	record.PolicySet = decision.PolicySet
+	record.IsAllowed = decision.Allowed
+	record.Reason = decision.Reason(req.Resource, req.Intent)
 	if !decision.Allowed {
 		record.IsTriggered = true
 	}
