@@ -43,9 +43,11 @@ func Scan() []Installation {
 			installations = append(installations, scanWindowsNative(fingerprint, home)...)
 			installations = append(installations, scanWindowsWinget(fingerprint, home)...)
 			installations = append(installations, scanWindowsNpm(fingerprint, home)...)
+			installations = append(installations, scanWindowsUserPrograms(fingerprint, home)...)
 		}
 		installations = append(installations, scanWindowsDesktop(fingerprint, homes)...)
 		installations = append(installations, scanMachineWinget(fingerprint)...)
+		installations = append(installations, scanMachinePrograms(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
 	return dedupeInstallations(installations)
@@ -179,6 +181,60 @@ func scanMachineWinget(fingerprint *compiledFingerprint) []Installation {
 		}
 		seen[key] = true
 		result = append(result, scanWingetPackages(fingerprint, root, "SYSTEM")...)
+	}
+	return result
+}
+
+// scanWindowsUserPrograms covers the two per-user layouts that are not driven
+// by a package manager: a setup installer that could not elevate and so wrote
+// itself under %LOCALAPPDATA%\Programs, and an installer that manages a tree of
+// its own directly under %LOCALAPPDATA%.
+func scanWindowsUserPrograms(fingerprint *compiledFingerprint, home homeDir) []Installation {
+	local := localAppData(home)
+	result := scanWindowsInstallDirs(fingerprint, filepath.Join(local, "Programs"), fingerprint.WindowsProgramDirs, home.owner, "installer")
+	return append(result, scanWindowsInstallDirs(fingerprint, local, fingerprint.WindowsUserDirs, home.owner, "native")...)
+}
+
+func scanMachinePrograms(fingerprint *compiledFingerprint) []Installation {
+	var result []Installation
+	seen := map[string]bool{}
+	for _, variable := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+		root := os.Getenv(variable)
+		if root == "" {
+			continue
+		}
+		key := strings.ToLower(filepath.Clean(root))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, scanWindowsInstallDirs(fingerprint, root, fingerprint.WindowsProgramDirs, "SYSTEM", "installer")...)
+	}
+	return result
+}
+
+// scanWindowsInstallDirs reports an installer layout: one directory per agent
+// holding the whole application, with the launcher at its root.
+func scanWindowsInstallDirs(fingerprint *compiledFingerprint, root string, dirs []string, owner, method string) []Installation {
+	if fingerprint.ExecName == "" || root == "" {
+		return nil
+	}
+
+	var result []Installation
+	for _, dir := range dirs {
+		installDir := filepath.Join(root, filepath.FromSlash(dir))
+		executable := filepath.Join(installDir, fingerprint.ExecName+".exe")
+		if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		version := ""
+		if fingerprint.WindowsVersionFile != "" {
+			version = jsonVersion(filepath.Join(installDir, filepath.FromSlash(fingerprint.WindowsVersionFile)))
+		}
+		result = append(result, Installation{
+			Name: fingerprint.DisplayName, Version: version, Path: executable,
+			InstallMethod: method, Owner: owner,
+		})
 	}
 	return result
 }

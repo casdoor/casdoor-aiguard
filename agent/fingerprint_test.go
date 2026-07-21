@@ -46,6 +46,22 @@ func TestIdentifyExecutable(t *testing.T) {
 		// OpenClaw, whose only installation layout is its npm package.
 		{"/home/alice/.npm-global/lib/node_modules/openclaw/dist/cli.js", "openclaw"},
 		{`C:\Users\alice\AppData\Roaming\npm\node_modules\openclaw\dist\cli.js`, "openclaw"},
+		// Codex CLI, whose Windows installer manages a tree of its own and
+		// re-executes the launcher out of a content-addressed subdirectory.
+		{`C:\Users\alice\AppData\Local\OpenAI\Codex\bin\codex.exe`, "codex-cli"},
+		{`C:\Users\alice\AppData\Local\OpenAI\Codex\bin\3135b80b111fd431\codex.exe`, "codex-cli"},
+		{"/home/alice/.npm-global/lib/node_modules/@openai/codex/bin/codex.js", "codex-cli"},
+		// Cursor, installed by its setup installer machine-wide or per-user.
+		{`C:\Program Files\cursor\Cursor.exe`, "cursor"},
+		{`C:\Program Files (x86)\cursor\Cursor.exe`, "cursor"},
+		{`C:\Users\alice\AppData\Local\Programs\cursor\Cursor.exe`, "cursor"},
+		{"/opt/homebrew/Caskroom/cursor/1.2.3/Cursor.app/Contents/MacOS/Cursor", "cursor"},
+		// Cursor Agent, whose CLI installs separately from the editor.
+		{`C:\Program Files\cursor-agent\cursor-agent.exe`, "cursor-agent"},
+		{"/home/alice/.local/share/cursor-agent/versions/1.2.3/cursor-agent", "cursor-agent"},
+		{"/home/alice/.local/bin/cursor-agent", "cursor-agent"},
+		// Windsurf.
+		{`C:\Users\alice\AppData\Local\Programs\Windsurf\Windsurf.exe`, "windsurf"},
 		// Unrelated executables must stay unrecognized.
 		{"/usr/bin/node", ""},
 		{"/usr/bin/bash", ""},

@@ -67,6 +67,27 @@ func scanNpmPatterns(fingerprint *compiledFingerprint, patterns []string, owner 
 	return result
 }
 
+// jsonVersion reads the "version" field of a JSON manifest, or returns "" when
+// the file is missing, oversized or not the manifest we expected. A version is
+// decoration on an installation, so no failure here is worth reporting.
+func jsonVersion(path string) string {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxPackageJSONSize {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &manifest) != nil {
+		return ""
+	}
+	return manifest.Version
+}
+
 // npmPackagePath renders a fingerprint's npm package name as a path fragment,
 // so callers can compose it into a platform-specific glob.
 func (f *compiledFingerprint) npmPackagePath() string {

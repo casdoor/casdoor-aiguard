@@ -52,6 +52,9 @@ export const AGENT_SITES = {
   "Codex": "openai.com",
   "Codex CLI": "openai.com",
   "Cursor": "cursor.com",
+  // Cursor's CLI has no policy set of its own yet, but the agent scan finds it
+  // and an installation still deserves the brand mark of the agent it is.
+  "Cursor Agent": "cursor.com",
   "GitHub Copilot": "github.com",
   "opencode": "opencode.ai",
   "Gemini CLI": "gemini.google.com",
