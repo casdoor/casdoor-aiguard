@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/conf"
@@ -98,6 +100,10 @@ func ListRecords(agent string, limit int) []*Record {
 		limit = records.size
 	}
 
+	// Collect in arrival order, then sort by when the events actually happened.
+	// The two differ: agents report each event on its own connection, so several
+	// events from one burst race each other here and arrive shuffled. Sorting on
+	// the agent's own timestamp is what keeps the audit trail in sequence.
 	result := make([]*Record, 0, min(limit, records.size))
 	for i := 0; i < records.size && len(result) < limit; i++ {
 		index := (records.head - 1 - i + recordRingCapacity) % recordRingCapacity
@@ -107,5 +113,22 @@ func ListRecords(agent string, limit int) []*Record {
 		}
 		result = append(result, record)
 	}
+
+	// A stable sort so records sharing a timestamp, or carrying one we cannot
+	// parse, keep their arrival order rather than being shuffled again.
+	sort.SliceStable(result, func(i, j int) bool {
+		return recordTime(result[i]).After(recordTime(result[j]))
+	})
 	return result
+}
+
+// recordTime parses a record's reported timestamp. Agents format it themselves,
+// so an unparseable value is possible; it sorts as the zero time, which leaves
+// such records at the end rather than dropping them.
+func recordTime(r *Record) time.Time {
+	parsed, err := time.Parse(time.RFC3339, r.CreatedTime)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }

@@ -75,7 +75,9 @@ func (r *Record) normalize() {
 		r.Owner = r.Agent
 	}
 	if r.CreatedTime == "" {
-		r.CreatedTime = time.Now().Format(time.RFC3339)
+		// Milliseconds, matching what the agents report: several events from one
+		// burst routinely share a second, and the Records page orders on this.
+		r.CreatedTime = time.Now().Format("2006-01-02T15:04:05.000Z07:00")
 	}
 	if len(r.Object) > maxRecordObjectBytes {
 		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"

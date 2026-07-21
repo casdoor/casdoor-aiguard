@@ -20,6 +20,7 @@ import (
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
+	"github.com/casdoor/casdoor-aiguard/mcpserver"
 	"github.com/casdoor/casdoor-aiguard/object"
 	"github.com/casdoor/casdoor-aiguard/proxy"
 	"github.com/casdoor/casdoor-aiguard/routers"
@@ -27,6 +28,9 @@ import (
 )
 
 func main() {
+	// Serves and exits when an agent launched this binary as its MCP server.
+	mcpserver.ServeIfInvoked()
+
 	util.LogRuntimeEnv()
 
 	if err := object.InitSettings(); err != nil {
