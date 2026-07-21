@@ -12,35 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Shared between the Digital Employee page, which writes a person's policy set,
-// and the Policy Fusion page, which reads it back to combine with an agent's.
-// Both need the same thing first: the signed-in person's set, or the reason
-// there isn't one - a digital employee belongs to a person, so unlike the rest
-// of aiguard these two pages have nothing to show an anonymous session.
+// Shared by the three pages that work with a person's own policy: the Digital
+// Employee page, which writes the set they authored; the Self-Learning page,
+// which shows the set aiguard derived from their corrections; and the Policy
+// Fusion page, which reads both back to combine them with an agent's. All of
+// them need the same thing first: the signed-in person, or the reason there
+// isn't one - these sets belong to a person, so unlike the rest of aiguard
+// these pages have nothing to show an anonymous session.
 
 import React, {useCallback, useEffect, useState} from "react";
 import {Button, Empty, Typography} from "antd";
 import {ReloadOutlined} from "@ant-design/icons";
-import {getEmployeePolicySet} from "../backend/api";
+import {getEmployeePolicySet, getLearnedPolicySet} from "../backend/api";
 
 const {Text, Paragraph} = Typography;
 
-export function useEmployeePolicySet() {
+// Both of a person's policy sets - the one they wrote and the one aiguard
+// learned from their corrections - load the same way, so one hook serves both.
+function usePersonalPolicySet(load) {
   const [policySet, setPolicySet] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
   const reload = useCallback(() => {
-    getEmployeePolicySet()
+    load()
       .then((data) => {
         setPolicySet(data);
         setLoadError(null);
       })
       .catch((err) => setLoadError(err.message));
-  }, []);
+  }, [load]);
 
   useEffect(reload, [reload]);
 
   return {policySet, loadError, reload, setPolicySet};
+}
+
+export function useEmployeePolicySet() {
+  return usePersonalPolicySet(getEmployeePolicySet);
+}
+
+// The self-learned set: the Casbin rules derived from the records this person
+// marked as wrongly decided. It is read wherever the employee's set is, because
+// the two together are what this person's policy actually is.
+export function useLearnedPolicySet() {
+  return usePersonalPolicySet(getLearnedPolicySet);
 }
 
 // EmployeeUnavailable explains why there is no policy set to work with, which

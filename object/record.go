@@ -60,6 +60,14 @@ type Record struct {
 	// Casdoor's field of the same name.
 	IsTriggered bool `json:"isTriggered"`
 
+	// The Casbin triple the /enforce path ruled on: Resource is the object
+	// ("host#tool" for an MCP tools/call) and Intent the action category. They
+	// are empty for a record that was only logged, and they are what makes a
+	// record correctable - a self-learned rule is written about exactly this
+	// pair, so without them there is nothing to learn from.
+	Resource string `json:"resource,omitempty"`
+	Intent   string `json:"intent,omitempty"`
+
 	// The verdict, filled in by the /enforce path. PolicySet names the set that
 	// ruled on the operation and is empty when no set did - either because the
 	// record was only logged, or because nothing enabled applied to it. Reason
@@ -67,6 +75,31 @@ type Record struct {
 	PolicySet string `json:"policySet,omitempty"`
 	IsAllowed bool   `json:"isAllowed"`
 	Reason    string `json:"reason,omitempty"`
+
+	// The operator's correction of the verdict above: "allow" or "deny" when a
+	// person disagreed with what aiguard decided, empty while nobody has said
+	// anything. This is the only field of a record a human writes, and it is the
+	// input the self-learned policy set is derived from - a blocked call marked
+	// "allow" becomes a rule saying that call should have gone through.
+	Feedback     string `json:"feedback,omitempty"`
+	FeedbackBy   string `json:"feedbackBy,omitempty"`
+	FeedbackTime string `json:"feedbackTime,omitempty"`
+}
+
+// The three states of a record's Feedback field. FeedbackNone is the empty
+// string rather than a word, so a record nobody has corrected serializes
+// without the field at all.
+const (
+	FeedbackNone  = ""
+	FeedbackAllow = "allow"
+	FeedbackDeny  = "deny"
+)
+
+// IsCorrectable reports whether a record can carry feedback at all. Only the
+// operations the /enforce path ruled on can: a record that was merely logged
+// has no Casbin triple to write a corrected rule about.
+func (r *Record) IsCorrectable() bool {
+	return r.Resource != "" && r.Intent != ""
 }
 
 // normalize fills in the fields a reporting agent is not expected to supply and

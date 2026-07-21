@@ -14,35 +14,87 @@
 
 import React, {useEffect, useMemo, useState} from "react";
 import {Alert, Button, Card, Col, Empty, Row, Select, Space, Spin, Table, Tag, Tooltip, Typography} from "antd";
-import {ArrowRightOutlined, EditOutlined, IdcardOutlined, MergeCellsOutlined, PlusOutlined} from "@ant-design/icons";
-import {useHistory} from "react-router-dom";
+import {ArrowRightOutlined, BulbOutlined, EditOutlined, IdcardOutlined, MergeCellsOutlined, PlusOutlined} from "@ant-design/icons";
+import {Link, useHistory} from "react-router-dom";
 import {getPolicySets} from "../backend/api";
 import {FUSION_STRATEGIES, runFusion} from "../utils/policyFusion";
 import {DecisionTag, PolicyEditor, editorStyle} from "./PolicyEditor";
-import {EmployeeUnavailable, useEmployeePolicySet} from "./employeePolicySet";
+import {EmployeeUnavailable, useEmployeePolicySet, useLearnedPolicySet} from "./employeePolicySet";
 import {AgentIcon, countPolicyRules} from "./policySetUtil";
 
 const {Title, Text, Paragraph} = Typography;
 
 // An intercepted call is never only a person's or only an agent's: it is this
-// person, working through that agent. Policy fusion reconciles the two policy
-// sets that each speak for one half of it - the digital employee's, stored on
-// the Casdoor user, and the Policy Hub set guarding the agent - into a single
-// verdict, and shows the reconciliation rather than just its result.
+// person, working through that agent, on an operation aiguard may already have
+// ruled on once and got wrong. Policy fusion reconciles the three policy sets
+// that each speak for one part of it - the digital employee's, stored on the
+// Casdoor user; the Policy Hub set guarding the agent; and the self-learned set
+// of corrections this person made on the Records page - into a single verdict,
+// and shows the reconciliation rather than just its result.
+//
+// The first two are peers, combined by the chosen strategy. The third overrides
+// both where it applies, because it is not a guess about what a call will be:
+// it is somebody's judgement about a call that already happened.
 
-// StatCard is one stage of the fusion pipeline: which set it is, and how its
-// verdicts came out over the calls being compared.
-function StatCard({icon, title, subtitle, rows, decisionOf, highlight = false}) {
-  const evaluated = rows.length;
-  const allowed = rows.filter((row) => decisionOf(row).allowed).length;
+// Each addend card stands for a whole policy set, and a reader looking at the
+// arithmetic will want to know what the summand actually says. PolicyPreview is
+// that: the set shown on hover exactly as the Digital Employee page writes it -
+// the same two editors, the same Casbin highlighting - so checking a surprising
+// verdict does not mean leaving the page the verdict is on.
+function PolicyPreview({title, model, policy}) {
+  const rules = countPolicyRules(policy);
 
   return (
+    // Policy rules are long single lines - an anchored host pattern plus an
+    // intent - so the preview is as wide as the viewport reasonably allows,
+    // which is what keeps them from wrapping into unreadable ribbons.
+    <div style={{width: "min(880px, 88vw)", color: "#262626"}}>
+      <Text strong style={{display: "block", marginBottom: 8}}>{title}</Text>
+      <Space direction="vertical" size={8} style={{display: "flex"}}>
+        <PolicyEditor
+          title="Casbin model"
+          extra={<Text type="secondary" style={{fontSize: 12}}>how a call is matched</Text>}
+          value={model}
+          rows={5}
+          maxHeight="150px"
+          language="conf"
+          readOnly
+        />
+        <PolicyEditor
+          title="Policy"
+          extra={<Text type="secondary" style={{fontSize: 12}}>{rules} rules</Text>}
+          value={rules === 0 ? "# This set has no rules yet." : policy}
+          rows={6}
+          maxHeight="260px"
+          language="csv"
+          readOnly
+        />
+      </Space>
+    </div>
+  );
+}
+
+// StatCard is one stage of the fusion pipeline: which set it is, and how its
+// verdicts came out over the calls being compared. A set that only speaks about
+// some of the calls - the learned one - counts the rest as "silent" rather than
+// as denials, because having nothing to say is not the same as saying no.
+//
+// Passing a `set` turns the card into a hover preview of the model and rules
+// behind the numbers; the fused card leaves it out, because its policy is
+// already printed in full further down the page.
+function StatCard({icon, title, subtitle, rows, decisionOf, set, highlight = false, partial = false}) {
+  const decisions = rows.map(decisionOf);
+  const evaluated = partial ? decisions.filter((decision) => !decision.skipped).length : decisions.length;
+  const allowed = decisions.filter((decision) => decision.allowed).length;
+
+  const card = (
     <Card
       size="small"
       style={{
         height: "100%",
         borderColor: highlight ? "#1677ff" : undefined,
         background: highlight ? "#f0f7ff" : undefined,
+        cursor: set ? "help" : undefined,
       }}
     >
       <Space align="start" size={10}>
@@ -53,10 +105,32 @@ function StatCard({icon, title, subtitle, rows, decisionOf, highlight = false}) 
           <div style={{marginTop: 6}}>
             <Tag color="green" style={{marginInlineEnd: 4}}>{allowed} allow</Tag>
             <Tag color="red" style={{marginInlineEnd: 0}}>{evaluated - allowed} deny</Tag>
+            {partial && rows.length > evaluated &&
+              <Tag style={{marginInlineStart: 4, marginInlineEnd: 0}}>{rows.length - evaluated} silent</Tag>
+            }
           </div>
         </div>
       </Space>
     </Card>
+  );
+
+  if (!set) {
+    return card;
+  }
+
+  return (
+    <Tooltip
+      color="#fff"
+      placement="bottom"
+      mouseEnterDelay={0.3}
+      // Each preview mounts two CodeMirror instances, so they are torn down when
+      // the tooltip closes rather than left in the DOM for every card at once.
+      destroyOnHidden
+      styles={{root: {maxWidth: "92vw"}, container: {padding: 12}}}
+      title={<PolicyPreview title={title} model={set.model} policy={set.policy} />}
+    >
+      {card}
+    </Tooltip>
   );
 }
 
@@ -69,9 +143,9 @@ function FusionArrow({symbol}) {
 }
 
 // The comparison table is the fusion itself, made visible: one row per call,
-// the two sets' verdicts beside each other and the fused one last. A row where
-// the two disagree is tinted, because those are the calls fusion decides.
-function FusionTable({rows}) {
+// the three sets' verdicts beside each other and the fused one last. A row where
+// they disagree is tinted, because those are the calls fusion decides.
+function FusionTable({rows, hasLearned}) {
   const columns = [
     {
       title: "Destination",
@@ -98,11 +172,26 @@ function FusionTable({rows}) {
       width: 110,
       render: (_, row) => <DecisionTag row={row.agent} />,
     },
+    ...(hasLearned ? [{
+      title: <Tooltip title="The corrections this person made on the Records page. Blank where no correction speaks about this call."><Space size={4}><BulbOutlined />Learned</Space></Tooltip>,
+      key: "learned",
+      width: 110,
+      render: (_, row) => (row.learned.skipped ? <Text type="secondary">—</Text> : <DecisionTag row={row.learned} />),
+    }] : []),
     {
       title: "Fused",
       key: "fused",
-      width: 110,
-      render: (_, row) => <DecisionTag row={row.fused} />,
+      width: 130,
+      render: (_, row) => (
+        <Space size={4}>
+          <DecisionTag row={row.fused} />
+          {row.overridden &&
+            <Tooltip title="A self-learned correction overturned what the two sets decided on their own.">
+              <BulbOutlined style={{color: "#faad14"}} />
+            </Tooltip>
+          }
+        </Space>
+      ),
     },
     {
       title: "Deciding rule",
@@ -126,7 +215,7 @@ function FusionTable({rows}) {
       columns={columns}
       pagination={false}
       size="small"
-      rowClassName={(row) => (row.changed ? "aiguard-fusion-row-changed" : "")}
+      rowClassName={(row) => (row.overridden ? "aiguard-fusion-row-learned" : row.changed ? "aiguard-fusion-row-changed" : "")}
     />
   );
 }
@@ -134,6 +223,10 @@ function FusionTable({rows}) {
 export default function PolicyFusionPage({account}) {
   const history = useHistory();
   const {policySet, loadError, reload} = useEmployeePolicySet();
+  // The learned set is optional in a way the other two are not: a person who has
+  // never corrected a record still has a fusion worth looking at, so a failure
+  // to load it must not take the page down with it.
+  const {policySet: learnedSet} = useLearnedPolicySet();
 
   const [agentSets, setAgentSets] = useState([]);
   const [selectedName, setSelectedName] = useState("");
@@ -185,7 +278,7 @@ export default function PolicyFusionPage({account}) {
       return;
     }
 
-    runFusion(policySet, agentSet, strategy)
+    runFusion(policySet, agentSet, learnedSet, strategy)
       .then((result) => {
         setFusion(result);
         setFusionError(null);
@@ -194,7 +287,7 @@ export default function PolicyFusionPage({account}) {
         setFusion(null);
         setFusionError(err.message);
       });
-  }, [policySet, agentSet, strategy]);
+  }, [policySet, agentSet, learnedSet, strategy]);
 
   if (loadError) {
     return <EmployeeUnavailable error={loadError} account={account} onRetry={reload} />;
@@ -208,7 +301,7 @@ export default function PolicyFusionPage({account}) {
 
   return (
     <div>
-      <style>{".aiguard-fusion-row-changed > td { background: #fffbe6; }"}</style>
+      <style>{".aiguard-fusion-row-changed > td { background: #fffbe6; } .aiguard-fusion-row-learned > td { background: #fff7e6; box-shadow: inset 3px 0 0 #faad14; }"}</style>
 
       <div style={{display: "flex", alignItems: "flex-start", gap: 12}}>
         <div style={{flex: 1}}>
@@ -217,8 +310,10 @@ export default function PolicyFusionPage({account}) {
           </Title>
           <Paragraph type="secondary" style={{marginTop: 8, marginBottom: 0, maxWidth: 900}}>
             An intercepted call is never only a person&apos;s or only an agent&apos;s: it is <strong>{policySet.displayName}</strong>,
-            working through an agent. Pick an agent&apos;s policy set to see the two reconciled - every call decided by your
-            digital employee&apos;s set, by the agent&apos;s set, and by the two fused together.
+            working through an agent, on an operation AIGuard may already have ruled on once. Pick an agent&apos;s policy set to
+            see three sets reconciled - your <Link to="/digital-employee">digital employee&apos;s</Link>, the agent&apos;s, and
+            the <Link to="/self-learning">self-learned</Link> corrections you made on the Records page, which overrule both
+            wherever they speak.
           </Paragraph>
         </div>
         <Button icon={<EditOutlined />} onClick={() => history.push("/digital-employee")}>
@@ -277,27 +372,45 @@ export default function PolicyFusionPage({account}) {
               ))}
 
               <Row gutter={[8, 8]} align="stretch">
-                <Col xs={24} md={7}>
+                <Col xs={24} md={5}>
                   <StatCard
                     icon={<IdcardOutlined />}
                     title={policySet.displayName}
                     subtitle={`digital employee · sub = ${fusion.fused.employeeSubject}`}
                     rows={fusion.rows}
                     decisionOf={(row) => row.employee}
+                    set={policySet}
                   />
                 </Col>
                 <Col xs={24} md={1}><FusionArrow symbol={<PlusOutlined />} /></Col>
-                <Col xs={24} md={7}>
+                <Col xs={24} md={5}>
                   <StatCard
                     icon={<AgentIcon agent={agentSet.agent} size={20} fallback={agentSet.icon} />}
                     title={agentSet.displayName}
                     subtitle={`policy set · sub = ${fusion.fused.agentSubject}`}
                     rows={fusion.rows}
                     decisionOf={(row) => row.agent}
+                    set={agentSet}
+                  />
+                </Col>
+                <Col xs={24} md={1}><FusionArrow symbol={<PlusOutlined />} /></Col>
+                <Col xs={24} md={5}>
+                  <StatCard
+                    icon={<BulbOutlined />}
+                    title="Self-learned"
+                    subtitle={
+                      fusion.hasLearned
+                        ? `${fusion.fused.learnedRuleCount} correction${fusion.fused.learnedRuleCount === 1 ? "" : "s"} · overrides both`
+                        : "nothing corrected yet"
+                    }
+                    rows={fusion.rows}
+                    decisionOf={(row) => row.learned}
+                    set={learnedSet || {model: policySet.model, policy: ""}}
+                    partial
                   />
                 </Col>
                 <Col xs={24} md={1}><FusionArrow symbol={<ArrowRightOutlined />} /></Col>
-                <Col xs={24} md={8}>
+                <Col xs={24} md={6}>
                   <StatCard
                     icon={<MergeCellsOutlined />}
                     title="Fused policy set"
@@ -314,12 +427,19 @@ export default function PolicyFusionPage({account}) {
                 title="Fused decisions"
                 style={{marginTop: 16}}
                 extra={
-                  <Text type="secondary" style={{fontSize: 12}}>
-                    {fusion.rows.filter((row) => row.changed).length} of {fusion.rows.length} calls the two sets decide differently
-                  </Text>
+                  <Space size={12}>
+                    <Text type="secondary" style={{fontSize: 12}}>
+                      {fusion.rows.filter((row) => row.changed).length} of {fusion.rows.length} calls the sets decide differently
+                    </Text>
+                    {fusion.rows.some((row) => row.overridden) &&
+                      <Tag color="gold" icon={<BulbOutlined />} style={{marginInlineEnd: 0}}>
+                        {fusion.rows.filter((row) => row.overridden).length} overturned by learning
+                      </Tag>
+                    }
+                  </Space>
                 }
               >
-                <FusionTable rows={fusion.rows} />
+                <FusionTable rows={fusion.rows} hasLearned={fusion.hasLearned} />
               </Card>
 
               <Row gutter={[16, 16]} style={{marginTop: 16}}>

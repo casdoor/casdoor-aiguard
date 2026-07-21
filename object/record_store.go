@@ -16,6 +16,7 @@ package object
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,6 +88,71 @@ func AddRecord(r *Record) {
 			}
 		}
 	}
+}
+
+// SetRecordFeedback records one operator's correction of a verdict and returns
+// the corrected record. The correction is appended to the record log as a fresh
+// line rather than rewriting the original: the log is an append-only audit
+// trail, so "this was blocked" and "a person later said it should not have
+// been" are two facts about the same operation, not one replacing the other.
+//
+// Only a record the enforcer ruled on can be corrected, because only those
+// carry the Casbin triple a self-learned rule would be written about.
+func SetRecordFeedback(id string, feedback string, by string) (*Record, error) {
+	if feedback != FeedbackNone && feedback != FeedbackAllow && feedback != FeedbackDeny {
+		return nil, fmt.Errorf("unknown feedback %q, expected %q or %q", feedback, FeedbackAllow, FeedbackDeny)
+	}
+
+	records.mutex.Lock()
+	var record *Record
+	for i := 0; i < records.size; i++ {
+		index := (records.head - 1 - i + recordRingCapacity) % recordRingCapacity
+		if records.records[index] != nil && records.records[index].Id == id {
+			record = records.records[index]
+			break
+		}
+	}
+	if record == nil {
+		records.mutex.Unlock()
+		return nil, fmt.Errorf("the record %q is no longer in the buffer, it may have aged out", id)
+	}
+	if !record.IsCorrectable() {
+		records.mutex.Unlock()
+		return nil, fmt.Errorf("the record %q was only logged, not ruled on, so there is no decision to correct", id)
+	}
+
+	record.Feedback = feedback
+	if feedback == FeedbackNone {
+		record.FeedbackBy = ""
+		record.FeedbackTime = ""
+	} else {
+		record.FeedbackBy = by
+		record.FeedbackTime = time.Now().Format(time.RFC3339)
+	}
+	corrected := *record
+	f := records.logFile
+	records.mutex.Unlock()
+
+	if f != nil {
+		if line, err := json.Marshal(&corrected); err == nil {
+			if _, err := f.Write(append(line, '\n')); err != nil {
+				logs.Warn("failed to write record log: %v", err)
+			}
+		}
+	}
+	return &corrected, nil
+}
+
+// CorrectedRecords returns every record an operator has given feedback on,
+// newest first. It is what the self-learned policy set is rebuilt from.
+func CorrectedRecords() []*Record {
+	result := []*Record{}
+	for _, record := range ListRecords("", 0) {
+		if record.Feedback != FeedbackNone {
+			result = append(result, record)
+		}
+	}
+	return result
 }
 
 // ListRecords returns up to `limit` most recent records, newest first. An empty

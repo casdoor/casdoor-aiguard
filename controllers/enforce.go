@@ -22,14 +22,13 @@ import (
 )
 
 // enforceRequest is what a patched agent's intercept path posts to ask for a
-// verdict on one operation. It carries the same fields as a behaviour record -
-// the operation is logged either way - plus the two the enforcer needs: the
+// verdict on one operation. It is a behaviour record - the operation is logged
+// either way - and the two fields the enforcer needs are part of it: the
 // resource (the Casbin object, e.g. "127.0.0.1#delete_file") and the intent (the
-// Casbin action, e.g. "mcp.tool_call").
+// Casbin action, e.g. "mcp.tool_call"). They are kept on the stored record too,
+// so a verdict can be corrected later and learned from.
 type enforceRequest struct {
 	object.Record
-	Resource string `json:"resource"`
-	Intent   string `json:"intent"`
 }
 
 // Enforce is the interception counterpart to AddRecord: where AddRecord only
@@ -62,6 +61,7 @@ func (c *ApiController) Enforce() {
 	req.ClientIp = strings.TrimSpace(c.Ctx.Input.IP())
 
 	decision := object.EnforceForAgent(req.Agent, req.Resource, req.Intent)
+
 
 	// Carry the verdict onto the record, so the Records page shows which set
 	// ruled on the operation and why it was stopped, not just that it was.

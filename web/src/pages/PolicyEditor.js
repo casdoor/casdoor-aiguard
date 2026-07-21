@@ -51,7 +51,11 @@ const readOnlyTheme = EditorView.theme({
 // A fused set is generated rather than written, so its editors are read-only:
 // there is nothing to save, and editing them would only diverge from the two
 // sets they were derived from.
-export function PolicyEditor({title, extra, value, rows, onChange, language, readOnly = false}) {
+//
+// `rows` sets the height the editor starts at; `maxHeight` caps how far it
+// grows, which is what lets the same editor appear somewhere that cannot give
+// it the whole page - the policy previews on the fusion cards.
+export function PolicyEditor({title, extra, value, rows, maxHeight, onChange, language, readOnly = false}) {
   const extensions = [cmTheme, EditorView.lineWrapping];
   if (LANGUAGE_EXTENSIONS[language]) {
     extensions.push(LANGUAGE_EXTENSIONS[language]);
@@ -67,6 +71,7 @@ export function PolicyEditor({title, extra, value, rows, onChange, language, rea
         onChange={onChange}
         extensions={extensions}
         minHeight={`${rows * 1.6}em`}
+        maxHeight={maxHeight}
         basicSetup={{
           lineNumbers: true,
           highlightActiveLine: !readOnly,

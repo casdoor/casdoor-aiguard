@@ -70,6 +70,13 @@ export function getRecords(agent = "", limit = 200) {
   return request(`/api/records?agent=${encodeURIComponent(agent)}&limit=${limit}`);
 }
 
+// Corrects the verdict on one record: feedback is "allow", "deny", or "" to
+// withdraw a correction. Resolves to {record, policySet}, because correcting a
+// record is also what teaches the self-learned policy set.
+export function setRecordFeedback(id, feedback) {
+  return request("/api/records/feedback", {method: "POST", body: JSON.stringify({id, feedback})});
+}
+
 export function getPolicy() {
   return request("/api/policy");
 }
@@ -104,6 +111,18 @@ export function getEmployeePolicySet() {
 
 export function updateEmployeePolicySet(policySet) {
   return request("/api/employee-policy-set", {method: "POST", body: JSON.stringify(policySet)});
+}
+
+// The rules aiguard learned from the records this person corrected, rendered as
+// a policy set. Read-only: it is written by giving feedback on the Records page,
+// not by editing it here.
+export function getLearnedPolicySet() {
+  return request("/api/learned-policy-set");
+}
+
+// Forgets one learned rule and withdraws the record feedback it came from.
+export function deleteLearnedRule(id) {
+  return request("/api/learned-policy-set/delete", {method: "POST", body: JSON.stringify({id})});
 }
 
 export function getSettings() {

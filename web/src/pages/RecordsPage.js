@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, {useEffect, useState} from "react";
-import {Alert, Descriptions, Select, Space, Table, Tag, Typography} from "antd";
-import {RobotOutlined} from "@ant-design/icons";
+import React, {useCallback, useEffect, useState} from "react";
+import {Alert, Descriptions, Select, Space, Table, Tag, Tooltip, Typography, message} from "antd";
+import {BulbOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link, useHistory, useLocation} from "react-router-dom";
-import {getAgents, getRecords} from "../backend/api";
+import {getAgents, getRecords, setRecordFeedback} from "../backend/api";
 import {AgentIcon} from "./policySetUtil";
 
 const {Title, Text} = Typography;
@@ -44,10 +44,74 @@ function prettyObject(object) {
   }
 }
 
+// A record is aiguard's account of what happened, and the verdict on it is a
+// guess made by rules somebody wrote in advance. FeedbackCell is where a person
+// who knows better corrects that guess - and the correction does not stay a
+// note: aiguard turns it into a Casbin rule on the Self-Learning page, so the
+// same call is decided the corrected way next time.
+function FeedbackCell({record, onChanged}) {
+  const [saving, setSaving] = useState(false);
+
+  // Only an operation the enforcer ruled on carries the Casbin triple a rule
+  // would be written about; everything else was merely logged.
+  if (!record.resource || !record.intent) {
+    return (
+      <Tooltip title="This record was only logged, not ruled on, so there is no decision to correct.">
+        <Text type="secondary">—</Text>
+      </Tooltip>
+    );
+  }
+
+  const change = (value) => {
+    setSaving(true);
+    setRecordFeedback(record.id, value)
+      .then(() => {
+        message.success(
+          value === ""
+            ? "Correction withdrawn - the rule it taught was forgotten"
+            : `Learned: ${record.intent} on "${record.resource}" should ${value}`
+        );
+        onChanged();
+      })
+      .catch((err) => message.error(err.message))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Select
+      size="small"
+      style={{width: 150}}
+      value={record.feedback || ""}
+      loading={saving}
+      disabled={saving}
+      onChange={change}
+      options={[
+        {value: "", label: <Text type="secondary">verdict is right</Text>},
+        {value: "allow", label: "should be allowed"},
+        {value: "deny", label: "should be blocked"},
+      ]}
+    />
+  );
+}
+
 function RecordDetail({record}) {
   return (
     <Descriptions bordered size="small" column={1} style={{margin: 8}}>
       <Descriptions.Item label="Record">{record.id}</Descriptions.Item>
+      {record.resource && <Descriptions.Item label="Resource"><Text code>{record.resource}</Text></Descriptions.Item>}
+      {record.intent && <Descriptions.Item label="Intent"><Text code>{record.intent}</Text></Descriptions.Item>}
+      {record.feedback && (
+        <Descriptions.Item label="Correction">
+          <Space>
+            <Tag color="gold" icon={<BulbOutlined />}>should {record.feedback}</Tag>
+            <Text type="secondary">
+              corrected by {record.feedbackBy}
+              {record.feedbackTime ? ` on ${new Date(record.feedbackTime).toLocaleString()}` : ""} -
+            </Text>
+            <Link to="/self-learning">see the rule it taught</Link>
+          </Space>
+        </Descriptions.Item>
+      )}
       {record.agentPath && <Descriptions.Item label="Agent path"><Text code>{record.agentPath}</Text></Descriptions.Item>}
       {record.sessionKey && <Descriptions.Item label="Session">{record.sessionKey}</Descriptions.Item>}
       {record.clientIp && <Descriptions.Item label="Reported from">{record.clientIp}</Descriptions.Item>}
@@ -84,19 +148,20 @@ export default function RecordsPage() {
       .catch(() => setAgents([]));
   }, []);
 
+  const load = useCallback(() => {
+    getRecords(agent, 200)
+      .then((data) => {
+        setRecords(data || []);
+        setError(null);
+      })
+      .catch((err) => setError(err.message));
+  }, [agent]);
+
   useEffect(() => {
-    const load = () => {
-      getRecords(agent, 200)
-        .then((data) => {
-          setRecords(data || []);
-          setError(null);
-        })
-        .catch((err) => setError(err.message));
-    };
     load();
     const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
-  }, [agent]);
+  }, [load]);
 
   const agentOptions = [
     {value: "", label: "All agents"},
@@ -104,6 +169,8 @@ export default function RecordsPage() {
       .filter(Boolean)
       .map((id) => ({value: id, label: id})),
   ];
+
+  const corrected = records.filter((record) => record.feedback).length;
 
   const setAgent = (value) => {
     history.push(value ? `/records?agent=${encodeURIComponent(value)}` : "/records");
@@ -154,12 +221,31 @@ export default function RecordsPage() {
       ellipsis: true,
       render: (value) => (value ? <Text type="danger">{value}</Text> : null),
     },
+    {
+      title: (
+        <Tooltip title="Disagree with a verdict? Correct it here. Each correction becomes a Casbin rule on the Self-Learning page, so the same call is decided your way next time.">
+          <Space size={4}><BulbOutlined />Feedback</Space>
+        </Tooltip>
+      ),
+      key: "feedback",
+      width: 170,
+      render: (_, record) => <FeedbackCell record={record} onChanged={load} />,
+    },
   ];
 
   return (
     <div>
       <Space style={{display: "flex", justifyContent: "space-between", marginBottom: 16}}>
-        <Title level={3} style={{margin: 0}}>Records</Title>
+        <Space align="center">
+          <Title level={3} style={{margin: 0}}>Records</Title>
+          {corrected > 0 &&
+            <Link to="/self-learning">
+              <Tag color="gold" icon={<BulbOutlined />} style={{cursor: "pointer"}}>
+                {corrected} correction{corrected === 1 ? "" : "s"} learned
+              </Tag>
+            </Link>
+          }
+        </Space>
         <Select
           value={agent}
           options={agentOptions}
