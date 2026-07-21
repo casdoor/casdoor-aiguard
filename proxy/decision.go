@@ -82,7 +82,13 @@ func (e *Engine) Decide(host string, req *http.Request, body []byte, meta Source
 		return build(recognizerName, intent, stubAction, reason)
 
 	default: // ActionPdp
-		source := meta.ProcessName
+		// The recognized agent ("claude-code") is the subject a policy is
+		// written against; the process name ("node") is only the fallback for
+		// traffic aiguard could not attribute to a known agent.
+		source := meta.Agent
+		if source == "" {
+			source = meta.ProcessName
+		}
 		if source == "" {
 			source = "unknown-agent"
 		}

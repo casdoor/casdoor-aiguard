@@ -17,7 +17,8 @@ import {Layout, Menu} from "antd";
 import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
-import PolicyPage from "./pages/PolicyPage";
+import PolicyHubPage from "./pages/PolicyHubPage";
+import PolicySetPage from "./pages/PolicySetPage";
 import InterceptPage from "./pages/InterceptPage";
 import CasdoorSettingsPage from "./pages/CasdoorSettingsPage";
 import AgentsPage from "./pages/AgentsPage";
@@ -29,10 +30,19 @@ const menuItems = [
   {key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link>},
   {key: "/agents", icon: <RobotOutlined />, label: <Link to="/agents">Agents</Link>},
   {key: "/records", icon: <FileTextOutlined />, label: <Link to="/records">Records</Link>},
-  {key: "/policy", icon: <SafetyCertificateOutlined />, label: <Link to="/policy">Policy</Link>},
+  {key: "/policyhub", icon: <SafetyCertificateOutlined />, label: <Link to="/policyhub">Policy Hub</Link>},
   {key: "/intercept", icon: <ApiOutlined />, label: <Link to="/intercept">Interception</Link>},
   {key: "/casdoor", icon: <SettingOutlined />, label: <Link to="/casdoor">Casdoor Connection</Link>},
 ];
+
+// A policy set lives under /policyhub/<name>, so the menu highlights the
+// deepest item whose path the current URL sits inside rather than an exact match.
+function selectedMenuKey(pathname) {
+  const match = menuItems
+    .filter((item) => item.key !== "/" && (pathname === item.key || pathname.startsWith(`${item.key}/`)))
+    .sort((a, b) => b.key.length - a.key.length)[0];
+  return match ? match.key : "/";
+}
 
 function App() {
   const location = useLocation();
@@ -44,7 +54,7 @@ function App() {
       </Header>
       <Layout>
         <Sider width={220} theme="light">
-          <Menu mode="inline" selectedKeys={[location.pathname]} items={menuItems} style={{height: "100%"}} />
+          <Menu mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={menuItems} style={{height: "100%"}} />
         </Sider>
         <Layout style={{padding: 24}}>
           <Content style={{background: "#fff", padding: 24, margin: 0}}>
@@ -52,7 +62,8 @@ function App() {
               <Route exact path="/" component={DashboardPage} />
               <Route exact path="/agents" component={AgentsPage} />
               <Route exact path="/records" component={RecordsPage} />
-              <Route exact path="/policy" component={PolicyPage} />
+              <Route exact path="/policyhub" component={PolicyHubPage} />
+              <Route exact path="/policyhub/:name" component={PolicySetPage} />
               <Route exact path="/intercept" component={InterceptPage} />
               <Route exact path="/casdoor" component={CasdoorSettingsPage} />
             </Switch>

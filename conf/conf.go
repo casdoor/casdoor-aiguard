@@ -195,3 +195,14 @@ func GetPdpEnforcePath() string {
 	}
 	return path
 }
+
+// GetPolicyHubDir is the directory holding the Policy Hub's policy sets, one
+// JSON file per set. It is read at request time so sets can be added, edited or
+// removed without restarting aiguard.
+func GetPolicyHubDir() string {
+	dir := GetConfigString("policyHubDir")
+	if dir == "" {
+		dir = "./data/policyhub"
+	}
+	return dir
+}

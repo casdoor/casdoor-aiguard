@@ -28,6 +28,8 @@ func InitAPI() {
 	web.Router("/api/records", &controllers.ApiController{}, "POST:AddRecord")
 	web.Router("/api/policy", &controllers.ApiController{}, "GET:GetPolicy")
 	web.Router("/api/policy", &controllers.ApiController{}, "POST:UpdatePolicy")
+	web.Router("/api/policy-sets", &controllers.ApiController{}, "GET:GetPolicySets")
+	web.Router("/api/policy-set", &controllers.ApiController{}, "GET:GetPolicySet")
 	web.Router("/api/settings", &controllers.ApiController{}, "GET:GetSettings")
 	web.Router("/api/settings", &controllers.ApiController{}, "POST:UpdateSettings")
 	web.Router("/api/ca-cert", &controllers.ApiController{}, "GET:DownloadCaCert")

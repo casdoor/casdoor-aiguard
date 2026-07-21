@@ -53,6 +53,16 @@ export function updatePolicy(policy) {
   return request("/api/policy", {method: "POST", body: JSON.stringify(policy)});
 }
 
+// The Policy Hub's policy sets are read from aiguard's policy hub directory on
+// every call, so a JSON file dropped in there shows up without a restart.
+export function getPolicySets() {
+  return request("/api/policy-sets");
+}
+
+export function getPolicySet(name) {
+  return request(`/api/policy-set?name=${encodeURIComponent(name)}`);
+}
+
 export function getSettings() {
   return request("/api/settings");
 }
