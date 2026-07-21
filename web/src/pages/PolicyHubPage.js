@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, {useEffect, useState} from "react";
-import {Alert, Button, Card, Col, Empty, Input, Row, Select, Spin, Tag, Typography} from "antd";
+import React, {useCallback, useEffect, useState} from "react";
+import {Alert, Button, Card, Col, Empty, Input, Row, Select, Spin, Switch, Tag, Tooltip, Typography, message} from "antd";
 import {ArrowRightOutlined, SafetyCertificateOutlined} from "@ant-design/icons";
 import {useHistory} from "react-router-dom";
-import {getPolicySets} from "../backend/api";
+import {getPolicySets, setPolicySetEnabled} from "../backend/api";
 import {AGENT_ORDER, AgentIcon, OS_FAMILIES, STRICTNESS_COLORS, STRICTNESS_ORDER, countPolicyRules, osFamily, sortByOrder} from "./policySetUtil";
 
 const {Title, Text, Paragraph} = Typography;
@@ -82,7 +82,36 @@ function osOptions(policySets) {
   ];
 }
 
-function PolicySetCard({policySet, onOpen}) {
+// EnableControl is the switch that turns a set on for live interception. It sits
+// inside the card, which navigates on click, so every interaction stops the
+// click from bubbling. When the host cannot enforce the set (agent not patched,
+// wrong OS) the switch is disabled and the reason shows as a tooltip; an already
+// enabled set can always be turned off.
+function EnableControl({policySet, onToggle}) {
+  const [busy, setBusy] = useState(false);
+  const {enabled, canEnable, enableReason} = policySet;
+  const blocked = !enabled && !canEnable;
+
+  const handleToggle = (checked, event) => {
+    event?.stopPropagation?.();
+    setBusy(true);
+    Promise.resolve(onToggle(policySet, checked)).finally(() => setBusy(false));
+  };
+
+  const control = (
+    <span
+      onClick={(e) => e.stopPropagation()}
+      style={{display: "inline-flex", alignItems: "center", gap: 8}}
+    >
+      <Switch size="small" checked={!!enabled} disabled={busy || blocked} loading={busy} onChange={handleToggle} />
+      <Text style={{fontSize: 13}} type={enabled ? undefined : "secondary"}>{enabled ? "Enabled" : "Disabled"}</Text>
+    </span>
+  );
+
+  return blocked && enableReason ? <Tooltip title={enableReason}>{control}</Tooltip> : control;
+}
+
+function PolicySetCard({policySet, onOpen, onToggle}) {
   const strictness = policySet.strictness || "";
 
   return (
@@ -104,6 +133,7 @@ function PolicySetCard({policySet, onOpen}) {
               {policySet.author ? ` · by ${policySet.author}` : ""}
             </Text>
           </div>
+          {policySet.enabled && <Tag color="green" style={{margin: 0}}>Enabled</Tag>}
           {strictness && <Tag color={STRICTNESS_COLORS[strictness]} style={{margin: 0}}>{strictness}</Tag>}
         </div>
 
@@ -117,8 +147,11 @@ function PolicySetCard({policySet, onOpen}) {
           {(policySet.tags || []).map((tag) => <Tag key={tag} style={{margin: 0}}>{tag}</Tag>)}
         </div>
 
-        <div style={{marginTop: 14, color: "#1677ff", fontSize: 13}}>
-          Open policy set <ArrowRightOutlined />
+        <div style={{marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8}}>
+          <EnableControl policySet={policySet} onToggle={onToggle} />
+          <span style={{color: "#1677ff", fontSize: 13, whiteSpace: "nowrap"}}>
+            Open policy set <ArrowRightOutlined />
+          </span>
         </div>
       </Card>
     </Col>
@@ -137,8 +170,8 @@ export default function PolicyHubPage() {
   const [os, setOs] = useState("");
   const [strictness, setStrictness] = useState("");
 
-  useEffect(() => {
-    getPolicySets()
+  const load = useCallback(() => {
+    return getPolicySets()
       .then((data) => {
         setPolicySets(data || []);
         setError(null);
@@ -146,6 +179,21 @@ export default function PolicyHubPage() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Persist the toggle, then reload so the card reflects the server's decision
+  // (which re-checks the same gate) rather than an optimistic guess.
+  const onToggle = (policySet, enabled) => {
+    return setPolicySetEnabled(policySet.name, enabled)
+      .then(() => {
+        message.success(enabled ? `Enabled ${policySet.displayName}` : `Disabled ${policySet.displayName}`);
+        return load();
+      })
+      .catch((err) => message.error(err.message));
+  };
 
   const filtered = policySets.filter((policySet) => matches(policySet, {search, agent, os, strictness}));
   const isFiltered = !!(search || agent || os || strictness);
@@ -211,6 +259,7 @@ export default function PolicyHubPage() {
               key={policySet.name}
               policySet={policySet}
               onOpen={() => history.push(`/policyhub/${policySet.name}`)}
+              onToggle={onToggle}
             />
           ))}
         </Row>

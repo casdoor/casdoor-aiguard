@@ -153,6 +153,7 @@ func (p openclawPatcher) layoutOf(target Target) (openclawLayout, error) {
 // environment.
 func renderOpenclawHandler(target Target) string {
 	handler := strings.ReplaceAll(openclawHookHandler, "__AIGUARD_RECORDS_URL__", jsonString(conf.GetRecordsIngestUrl()))
+	handler = strings.ReplaceAll(handler, "__AIGUARD_ENFORCE_URL__", jsonString(conf.GetEnforceUrl()))
 	return strings.ReplaceAll(handler, "__AIGUARD_AGENT_PATH__", jsonString(target.Path))
 }
 

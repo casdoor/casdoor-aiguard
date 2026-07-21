@@ -19,11 +19,51 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
 	"github.com/casdoor/casdoor-aiguard/conf"
 )
+
+// osFamilies groups operating systems the way the Web UI's filter does (see
+// web/src/pages/policySetUtil.js): a set names one OS, but a distribution
+// belongs to the Linux family, so a Linux host may enforce any Linux set.
+var osFamilies = map[string]string{
+	"Windows": "Windows",
+	"macOS":   "macOS",
+	"Ubuntu":  "Linux", "Debian": "Linux", "CentOS": "Linux", "RHEL": "Linux",
+	"Fedora": "Linux", "Arch Linux": "Linux", "openSUSE": "Linux", "Alpine": "Linux",
+}
+
+// osFamilyOf maps one OS to its family, falling back to the OS itself for a
+// distribution the table above does not list yet.
+func osFamilyOf(os string) string {
+	if family, ok := osFamilies[os]; ok {
+		return family
+	}
+	return os
+}
+
+// HostOsFamily is the family of the operating system aiguard is running on, in
+// the same vocabulary a set's "os" field uses. It is what a set's OS is checked
+// against before the set may be enabled.
+func HostOsFamily() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "macOS"
+	default:
+		return "Linux"
+	}
+}
+
+// MatchesHostOs reports whether a set targeting the given OS may run on this
+// host, i.e. whether the two share an OS family.
+func MatchesHostOs(setOs string) bool {
+	return osFamilyOf(setOs) == HostOsFamily()
+}
 
 // Text is a block of newline-separated text (a Casbin model, policy or request
 // list). JSON files may spell it either as one string with "\n" escapes or,
@@ -78,6 +118,36 @@ type PolicySet struct {
 	Model   Text `json:"model"`
 	Policy  Text `json:"policy"`
 	Request Text `json:"request"`
+
+	// The fields below are computed per request, not read from the set's file:
+	// they describe whether this set is live and whether it may be turned on for
+	// the agents and OS present on this host. A file never sets them, so they
+	// marshal as their zero values until the controller fills them in.
+
+	// Enabled reports whether this set is currently enforcing on patched agents.
+	Enabled bool `json:"enabled"`
+	// CanEnable reports whether the operator may turn this set on right now; an
+	// already-enabled set can always be turned off, regardless of this.
+	CanEnable bool `json:"canEnable"`
+	// EnableReason explains, when CanEnable is false, why the set cannot be
+	// enabled - shown as the toggle's tooltip.
+	EnableReason string `json:"enableReason,omitempty"`
+}
+
+// interceptCapableAgents is the set of agents aiguard can inject a policy
+// decision into today, keyed by the display name a policy set stores in "agent".
+// OpenClaw is guarded by the hook in patch/openclaw_hook.js and Claude Desktop
+// by the MCP server in mcpserver/. Every other agent is instrumented for
+// reporting only, so its sets cannot be enabled until an intercept path exists.
+var interceptCapableAgents = map[string]bool{
+	"OpenClaw":       true,
+	"Claude Desktop": true,
+}
+
+// IsInterceptCapableAgent reports whether a set written for this agent (by its
+// "agent" display name) can be enforced on the host at all.
+func IsInterceptCapableAgent(agent string) bool {
+	return interceptCapableAgents[agent]
 }
 
 // GetPolicySets reads every JSON file in the policy hub directory. The

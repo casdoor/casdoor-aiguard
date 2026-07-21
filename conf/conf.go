@@ -145,6 +145,19 @@ func GetRecordsIngestUrl() string {
 	return url
 }
 
+// GetEnforceUrl is the endpoint a patched agent's intercept path calls to ask
+// aiguard for a verdict before performing an operation. It sits beside the
+// records ingest URL and defaults the same way: this process's own management
+// API on loopback, overridable for an agent that reaches the host by another
+// address.
+func GetEnforceUrl() string {
+	url := GetConfigString("enforceUrl")
+	if url == "" {
+		url = fmt.Sprintf("http://127.0.0.1:%d/api/enforce", GetConfigInt("httpport", 9000))
+	}
+	return url
+}
+
 // FailClosedOnPdpError controls behavior for recognized sensitive operations
 // when Casdoor (the PDP) is unreachable: true means deny by default.
 func FailClosedOnPdpError() bool {

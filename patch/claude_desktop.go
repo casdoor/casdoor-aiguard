@@ -130,6 +130,7 @@ func (p claudeDesktopPatcher) serverEntry() (map[string]any, error) {
 			mcpserver.Subcommand,
 			"--agent", p.AgentId(),
 			"--records-url", conf.GetRecordsIngestUrl(),
+			"--enforce-url", conf.GetEnforceUrl(),
 		},
 	}, nil
 }

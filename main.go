@@ -39,6 +39,9 @@ func main() {
 	if err := object.InitPolicy(); err != nil {
 		panic(err)
 	}
+	if err := object.InitPolicySetState(); err != nil {
+		panic(err)
+	}
 	if err := object.InitAuditLog(); err != nil {
 		panic(err)
 	}

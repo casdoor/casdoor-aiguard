@@ -82,6 +82,7 @@ type Server struct {
 	out        io.Writer
 	agentId    string
 	recordsUrl string
+	enforceUrl string
 
 	// writeMutex serializes protocol writes, since the reporter runs alongside
 	// the read loop.
@@ -124,6 +125,7 @@ func Run(args []string) error {
 	// Diagnostics must not touch stdout, which belongs to the protocol.
 	flags.SetOutput(os.Stderr)
 	recordsUrl := flags.String("records-url", "", "aiguard endpoint to post behaviour records to")
+	enforceUrl := flags.String("enforce-url", "", "aiguard endpoint to ask for a verdict before a tool call")
 	agentId := flags.String("agent", "claude-desktop", "id of the agent this server was registered with")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -134,6 +136,7 @@ func Run(args []string) error {
 		out:        os.Stdout,
 		agentId:    *agentId,
 		recordsUrl: *recordsUrl,
+		enforceUrl: *enforceUrl,
 		client:     &http.Client{Timeout: reportTimeout},
 		queue:      make(chan map[string]any, reportQueueDepth),
 	}
@@ -235,15 +238,73 @@ func (s *Server) callTool(message request) response {
 		return message.fail(invalidParams, fmt.Sprintf("unknown tool %q", params.Name))
 	}
 
-	s.report("tool", params.Name, params.Arguments)
-
+	// The reported action is the Casbin object; the intent is a tool call. An
+	// enabled Claude Desktop set that denies this triple blocks the operation:
+	// the model is told it may not proceed rather than being acknowledged.
 	action, _ := params.Arguments["action"].(string)
+	if !s.enforce("tool", params.Name, action, "mcp.tool_call", params.Arguments) {
+		return message.reply(map[string]any{
+			"isError": true,
+			"content": []map[string]any{{
+				"type": "text",
+				"text": fmt.Sprintf("Casdoor AIGuard denied %q: it is blocked by an enabled policy set, so the operation was not performed.", action),
+			}},
+		})
+	}
 	return message.reply(map[string]any{
 		"content": []map[string]any{{
 			"type": "text",
 			"text": fmt.Sprintf("Recorded %q in the Casdoor AIGuard audit log.", action),
 		}},
 	})
+}
+
+// enforce asks aiguard for a verdict on one operation and records it in the same
+// call. It returns true - allow - whenever no enforce endpoint is configured or
+// aiguard cannot be reached or does not answer cleanly, so a stopped or slow
+// aiguard never blocks the agent. When no enforce endpoint is set it falls back
+// to the fire-and-forget recording path, keeping the monitoring-only behaviour.
+func (s *Server) enforce(eventType, action, resource, intent string, payload map[string]any) bool {
+	if s.enforceUrl == "" {
+		s.report(eventType, action, payload)
+		return true
+	}
+
+	object := ""
+	if payload != nil {
+		if encoded, err := json.Marshal(payload); err == nil {
+			object = string(encoded)
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"agent":       s.agentId,
+		"createdTime": time.Now().Format(recordTimeFormat),
+		"eventType":   eventType,
+		"action":      action,
+		"object":      object,
+		"resource":    resource,
+		"intent":      intent,
+	})
+	if err != nil {
+		return true
+	}
+
+	resp, err := s.client.Post(s.enforceUrl, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+
+	var envelope struct {
+		Status string `json:"status"`
+		Data   struct {
+			Allowed bool `json:"allowed"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil || envelope.Status != "ok" {
+		return true
+	}
+	return envelope.Data.Allowed
 }
 
 // report queues one record for aiguard. It never blocks the caller, so an

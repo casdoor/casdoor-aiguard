@@ -63,6 +63,13 @@ export function getPolicySet(name) {
   return request(`/api/policy-set?name=${encodeURIComponent(name)}`);
 }
 
+// Enables or disables a policy set for live interception on patched agents. The
+// server re-checks the same gate the card shows, so enabling a set the host
+// cannot enforce is rejected with the reason.
+export function setPolicySetEnabled(name, enabled) {
+  return request("/api/policy-set/enable", {method: "POST", body: JSON.stringify({name, enabled})});
+}
+
 export function getSettings() {
   return request("/api/settings");
 }
