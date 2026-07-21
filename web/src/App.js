@@ -38,7 +38,7 @@ const menuItems = [
   {key: "/records", icon: <FileTextOutlined />, label: <Link to="/records">Records</Link>},
   {key: "/policyhub", icon: <SafetyCertificateOutlined />, label: <Link to="/policyhub">Policy Hub</Link>},
   {key: "/intercept", icon: <ApiOutlined />, label: <Link to="/intercept">Interception</Link>},
-  {key: "/casdoor", icon: <SettingOutlined />, label: <Link to="/casdoor">Casdoor Connection</Link>},
+  {key: "/casdoor", icon: <SettingOutlined />, label: <Link to="/casdoor">Settings</Link>},
 ];
 
 // A policy set lives under /policyhub/<name>, so the menu highlights the
