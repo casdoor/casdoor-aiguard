@@ -62,8 +62,18 @@ export const AGENT_SITES = {
   "CodeBuddy": "codebuddy.ai",
 };
 
+// The same agent reaches us under two spellings: a policy set carries the
+// display name ("Claude Code") while the agent scan and the records carry the
+// id ("claude-code"). Folding both to letters and digits alone lets one table
+// answer for either spelling.
+const agentKey = (agent) => String(agent || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const AGENT_SITES_BY_KEY = Object.fromEntries(
+  Object.entries(AGENT_SITES).map(([name, site]) => [agentKey(name), site])
+);
+
 export function agentIconUrl(agent) {
-  const site = AGENT_SITES[agent];
+  const site = AGENT_SITES_BY_KEY[agentKey(agent)];
   return site ? `https://www.google.com/s2/favicons?domain=${site}&sz=64` : "";
 }
 

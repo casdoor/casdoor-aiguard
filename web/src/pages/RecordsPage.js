@@ -14,8 +14,10 @@
 
 import React, {useEffect, useState} from "react";
 import {Alert, Descriptions, Select, Space, Table, Tag, Typography} from "antd";
+import {RobotOutlined} from "@ant-design/icons";
 import {Link, useHistory, useLocation} from "react-router-dom";
 import {getAgents, getRecords} from "../backend/api";
+import {AgentIcon} from "./policySetUtil";
 
 const {Title, Text} = Typography;
 
@@ -109,7 +111,17 @@ export default function RecordsPage() {
 
   const columns = [
     {title: "Time", dataIndex: "createdTime", key: "createdTime", render: (v) => new Date(v).toLocaleString()},
-    {title: "Agent", dataIndex: "agent", key: "agent", render: (v) => <Tag color="blue">{v}</Tag>},
+    {
+      title: "Agent",
+      dataIndex: "agent",
+      key: "agent",
+      render: (v) => (
+        <Tag color="blue" style={{display: "inline-flex", alignItems: "center", gap: 6}}>
+          <AgentIcon agent={v} size={16} fallback={<RobotOutlined />} />
+          {v}
+        </Tag>
+      ),
+    },
     {title: "Event", key: "event", render: (_, record) => <Text code>{`${record.eventType}:${record.action}`}</Text>},
     {title: "Channel", dataIndex: "channel", key: "channel"},
     {title: "User", dataIndex: "user", key: "user"},

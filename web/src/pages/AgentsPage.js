@@ -14,9 +14,10 @@
 
 import React, {useEffect, useState} from "react";
 import {Alert, Button, Popconfirm, Space, Table, Tag, Tooltip, Typography, message} from "antd";
-import {ReloadOutlined} from "@ant-design/icons";
+import {ReloadOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link} from "react-router-dom";
 import {getAgents, patchAgent, unpatchAgent} from "../backend/api";
+import {AgentIcon} from "./policySetUtil";
 
 const {Title, Text} = Typography;
 
@@ -87,7 +88,19 @@ export default function AgentsPage() {
   };
 
   const columns = [
-    {title: "Agent", dataIndex: "name", key: "name"},
+    {
+      title: "Agent",
+      dataIndex: "name",
+      key: "name",
+      // The brand mark is looked up from the agent's id, so an agent whose
+      // display name the icon table does not know still shows its name alone.
+      render: (value, record) => (
+        <Space size={8}>
+          <AgentIcon agent={record.agentId || value} size={20} fallback={<RobotOutlined style={{fontSize: 18, color: "#8c8c8c"}} />} />
+          {value}
+        </Space>
+      ),
+    },
     {title: "Version", dataIndex: "version", key: "version", render: (value) => value || "Unknown"},
     {title: "Install Method", dataIndex: "installMethod", key: "installMethod", render: (value) => <Tag>{value}</Tag>},
     {title: "Owner", dataIndex: "owner", key: "owner"},
