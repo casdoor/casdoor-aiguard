@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React from "react";
+import React, {useCallback, useEffect, useState} from "react";
 import {Layout, Menu} from "antd";
 import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
@@ -23,6 +23,9 @@ import InterceptPage from "./pages/InterceptPage";
 import CasdoorSettingsPage from "./pages/CasdoorSettingsPage";
 import AgentsPage from "./pages/AgentsPage";
 import RecordsPage from "./pages/RecordsPage";
+import AccountArea from "./auth/AccountArea";
+import AuthCallback from "./auth/AuthCallback";
+import {getAccount, getAuthConfig} from "./backend/api";
 
 const {Header, Sider, Content} = Layout;
 
@@ -46,11 +49,23 @@ function selectedMenuKey(pathname) {
 
 function App() {
   const location = useLocation();
+  // null means "anonymous" for the account and "not loaded yet" for the config;
+  // login is optional, so neither one blocks the pages from rendering.
+  const [authConfig, setAuthConfig] = useState(null);
+  const [account, setAccount] = useState(null);
+
+  useEffect(() => {
+    getAuthConfig().then(setAuthConfig).catch(() => setAuthConfig(null));
+    getAccount().then(setAccount).catch(() => setAccount(null));
+  }, []);
+
+  const onSignedIn = useCallback((claims) => setAccount(claims), []);
 
   return (
     <Layout style={{minHeight: "100vh"}}>
-      <Header style={{display: "flex", alignItems: "center"}}>
+      <Header style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
         <div style={{color: "#fff", fontSize: 18, fontWeight: 600}}>Casdoor AIGuard</div>
+        <AccountArea authConfig={authConfig} account={account} onSignedOut={() => setAccount(null)} />
       </Header>
       <Layout>
         <Sider width={220} theme="light">
@@ -66,6 +81,7 @@ function App() {
               <Route exact path="/policyhub/:name" component={PolicySetPage} />
               <Route exact path="/intercept" component={InterceptPage} />
               <Route exact path="/casdoor" component={CasdoorSettingsPage} />
+              <Route exact path="/callback" render={() => <AuthCallback onSignedIn={onSignedIn} />} />
             </Switch>
           </Content>
         </Layout>

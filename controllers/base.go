@@ -18,12 +18,54 @@
 package controllers
 
 import (
+	"encoding/gob"
+
 	"github.com/beego/beego/v2/server/web"
+	"github.com/casdoor/casdoor-aiguard/auth"
 )
+
+func init() {
+	// Claims travel through beego's session store, which encodes with gob.
+	gob.Register(auth.Claims{})
+}
 
 // ApiController is the base controller for handlers under /api.
 type ApiController struct {
 	web.Controller
+}
+
+// GetSessionClaims returns the signed-in operator's claims, or nil when the
+// session is anonymous - the normal state, since login is optional.
+func (c *ApiController) GetSessionClaims() *auth.Claims {
+	s := c.GetSession("user")
+	if s == nil {
+		return nil
+	}
+
+	claims, ok := s.(auth.Claims)
+	if !ok {
+		return nil
+	}
+	return &claims
+}
+
+// SetSessionClaims signs the operator in, or signs them out when claims is nil.
+func (c *ApiController) SetSessionClaims(claims *auth.Claims) {
+	if claims == nil {
+		c.DelSession("user")
+		return
+	}
+
+	c.SetSession("user", *claims)
+}
+
+// GetSessionUser returns the signed-in operator, or nil when anonymous.
+func (c *ApiController) GetSessionUser() *auth.User {
+	claims := c.GetSessionClaims()
+	if claims == nil {
+		return nil
+	}
+	return &claims.User
 }
 
 // Response is the envelope every /api endpoint replies with, mirroring Casdoor's.

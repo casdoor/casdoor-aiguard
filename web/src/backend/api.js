@@ -24,6 +24,25 @@ async function request(path, options) {
   return body.data;
 }
 
+// Operator login is optional: the Casdoor connection may be unconfigured or
+// down, in which case the UI just stays anonymous.
+export function getAuthConfig() {
+  return request("/api/auth-config");
+}
+
+// Resolves to null when nobody is signed in.
+export function getAccount() {
+  return request("/api/account");
+}
+
+export function signin(code, state) {
+  return request(`/api/signin?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`, {method: "POST"});
+}
+
+export function signout() {
+  return request("/api/signout", {method: "POST"});
+}
+
 export function getEvents(limit = 200) {
   return request(`/api/events?limit=${limit}`);
 }

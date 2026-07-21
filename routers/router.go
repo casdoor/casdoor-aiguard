@@ -20,6 +20,10 @@ import (
 )
 
 func InitAPI() {
+	web.Router("/api/auth-config", &controllers.ApiController{}, "GET:GetAuthConfig")
+	web.Router("/api/signin", &controllers.ApiController{}, "POST:Signin")
+	web.Router("/api/signout", &controllers.ApiController{}, "POST:Signout")
+	web.Router("/api/account", &controllers.ApiController{}, "GET:GetAccount")
 	web.Router("/api/agents", &controllers.ApiController{}, "GET:GetAgents")
 	web.Router("/api/agents/patch", &controllers.ApiController{}, "POST:PatchAgent")
 	web.Router("/api/agents/unpatch", &controllers.ApiController{}, "POST:UnpatchAgent")

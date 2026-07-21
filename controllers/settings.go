@@ -17,6 +17,7 @@ package controllers
 import (
 	"encoding/json"
 
+	"github.com/casdoor/casdoor-aiguard/auth"
 	"github.com/casdoor/casdoor-aiguard/object"
 )
 
@@ -46,6 +47,10 @@ func (c *ApiController) UpdateSettings() {
 		c.ResponseError(err.Error())
 		return
 	}
+
+	// Operator login points at the same Casdoor instance, so it has to follow
+	// the edit rather than wait for a restart.
+	auth.InitConfig()
 
 	c.ResponseOk(object.GetSettings())
 }

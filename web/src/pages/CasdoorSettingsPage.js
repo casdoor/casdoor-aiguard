@@ -53,6 +53,11 @@ export default function CasdoorSettingsPage() {
         aiguard authenticates to Casdoor with its own client-credentials grant, then calls Casdoor's Casbin
         enforce API to decide allow/deny for every recognized sensitive intent.
       </Typography.Paragraph>
+      <Typography.Paragraph type="secondary">
+        The same connection powers the optional login button in the top-right corner. Add
+        <Typography.Text code>{`${window.location.origin}/callback`}</Typography.Text>
+        to the Casdoor application&apos;s redirect URLs to let operators sign in.
+      </Typography.Paragraph>
 
       <Form layout="vertical" style={{maxWidth: 480}}>
         <Form.Item label="Endpoint">

@@ -19,6 +19,7 @@ import (
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
+	"github.com/casdoor/casdoor-aiguard/auth"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/mcpserver"
 	"github.com/casdoor/casdoor-aiguard/object"
@@ -63,6 +64,20 @@ func main() {
 	}()
 
 	proxy.ManageTransparentRedirect()
+
+	// Operator login is optional: this only prepares it, and a Casdoor that is
+	// unconfigured or down just leaves the Web UI anonymous.
+	auth.InitConfig()
+
+	// Sessions hold the signed-in operator. The file provider keeps a login
+	// alive across aiguard restarts, which are frequent while patching agents;
+	web.BConfig.WebConfig.Session.SessionOn = true
+	web.BConfig.WebConfig.Session.SessionName = "aiguard_session_id"
+	web.BConfig.WebConfig.Session.SessionProvider = "file"
+	web.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
+	sessionCookieLifeTime := 3600 * 24 * 30
+	web.BConfig.WebConfig.Session.SessionCookieLifeTime = sessionCookieLifeTime
+	web.BConfig.WebConfig.Session.SessionGCMaxLifetime = int64(sessionCookieLifeTime)
 
 	routers.InitAPI()
 	routers.InitStatic()
