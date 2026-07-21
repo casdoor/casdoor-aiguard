@@ -53,16 +53,25 @@ func scanNative(fingerprint *compiledFingerprint, home homeDir) []Installation {
 	}}
 }
 
-// userNpmPatterns are the per-user Node version manager layouts that can hold a
-// globally installed agent package.
+// userNpmPatterns are the per-user Node package manager layouts that can hold a
+// globally installed agent package, plus any bundled runtime the agent declares.
 func userNpmPatterns(fingerprint *compiledFingerprint, home string) []string {
 	pkg := fingerprint.npmPackagePath()
-	return []string{
+	patterns := []string{
+		filepath.Join(home, ".npm-global", "lib", "node_modules", pkg, "package.json"),
 		filepath.Join(home, ".nvm", "versions", "node", "*", "lib", "node_modules", pkg, "package.json"),
+		// fnm honours XDG when it is set and falls back to ~/.fnm otherwise.
+		filepath.Join(home, ".fnm", "node-versions", "*", "installation", "lib", "node_modules", pkg, "package.json"),
 		filepath.Join(home, ".local", "share", "fnm", "node-versions", "*", "installation", "lib", "node_modules", pkg, "package.json"),
 		filepath.Join(home, ".volta", "tools", "image", "packages", pkg, "lib", "node_modules", pkg, "package.json"),
 		filepath.Join(home, ".asdf", "installs", "nodejs", "*", "lib", "node_modules", pkg, "package.json"),
+		// pnpm groups its global packages under a store layout version.
+		filepath.Join(home, ".local", "share", "pnpm", "global", "*", "node_modules", pkg, "package.json"),
 	}
+	for _, dir := range fingerprint.ExtraUnixNpmDirs {
+		patterns = append(patterns, filepath.Join(home, filepath.FromSlash(dir), "node_modules", pkg, "package.json"))
+	}
+	return patterns
 }
 
 func fileOwner(path string) string {

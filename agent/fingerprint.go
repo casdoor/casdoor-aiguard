@@ -39,6 +39,13 @@ type Fingerprint struct {
 	StateDir string
 	// NpmPackage is the exact "name" field of the published npm package.
 	NpmPackage string
+	// ExtraUnixNpmDirs are agent-specific directories, relative to the user's
+	// home and slash-separated, that hold a "node_modules" alongside a bundled
+	// Node runtime. ExtraWindowsNpmDirs is the same, relative to %LOCALAPPDATA%.
+	// Both may contain glob wildcards. Agents installed only through a shared
+	// Node version manager need neither.
+	ExtraUnixNpmDirs    []string
+	ExtraWindowsNpmDirs []string
 	// WingetPackage is the winget package identifier, without its hash suffix.
 	WingetPackage string
 	// MSIXFamily is the Windows package family name ("<Name>_<PublisherId>").
@@ -82,7 +89,13 @@ var fingerprints = []Fingerprint{
 	{
 		ID:          "openclaw",
 		DisplayName: "OpenClaw",
-		CmdMarkers:  []string{"openclaw"},
+		ExecName:    "openclaw",
+		NpmPackage:  "openclaw",
+		// OpenClaw can bring its own Node runtime, which puts the package
+		// outside every shared version manager layout.
+		ExtraUnixNpmDirs:    []string{".openclaw/tools/node-v*/lib"},
+		ExtraWindowsNpmDirs: []string{"OpenClaw/deps/portable-node"},
+		CmdMarkers:          []string{"openclaw"},
 	},
 }
 
@@ -192,11 +205,11 @@ func deriveExecRules(f Fingerprint) []PathRule {
 		)
 	}
 	if f.DesktopInstallerDir != "" {
+		// The desktop installer keeps each build in its own versioned
+		// subdirectory and leaves a launcher at the root, so match the
+		// executable at any depth below the install directory.
 		root := "/appdata/local/" + strings.ToLower(f.DesktopInstallerDir)
-		rules = append(rules,
-			PathRule{Suffix: root + "/" + windowsExec},
-			PathRule{Contains: []string{root + "/app-"}, Suffix: "/" + windowsExec},
-		)
+		rules = append(rules, PathRule{Contains: []string{root + "/"}, Suffix: "/" + windowsExec})
 	}
 	if name, publisher, ok := splitMSIXFamily(f.MSIXFamily); ok {
 		rules = append(rules, PathRule{Contains: []string{

@@ -43,11 +43,15 @@ func TestIdentifyExecutable(t *testing.T) {
 		{`C:\Users\alice\AppData\Local\AnthropicClaude\claude.exe`, "claude-desktop"},
 		{`C:\Users\alice\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe`, "claude-desktop"},
 		{`C:\Program Files\WindowsApps\Claude_1.2.3_x64__pzs8sxrjxfjjc\app\claude.exe`, "claude-desktop"},
+		// OpenClaw, whose only installation layout is its npm package.
+		{"/home/alice/.npm-global/lib/node_modules/openclaw/dist/cli.js", "openclaw"},
+		{`C:\Users\alice\AppData\Roaming\npm\node_modules\openclaw\dist\cli.js`, "openclaw"},
 		// Unrelated executables must stay unrecognized.
 		{"/usr/bin/node", ""},
 		{"/usr/bin/bash", ""},
 		{"/home/alice/claude", ""},
 		{"/home/alice/.local/bin/claude-helper", ""},
+		{"/home/alice/openclaw/dist/cli.js", ""},
 		{"", ""},
 	}
 
@@ -64,6 +68,16 @@ func TestIdentifyExecutableMachineWinget(t *testing.T) {
 	path := `C:\Program Files\WinGet\Packages\Anthropic.ClaudeCode_abc123\claude.exe`
 	if got := IdentifyExecutable(path); got != "claude-code" {
 		t.Errorf("IdentifyExecutable(%q) = %q, want %q", path, got, "claude-code")
+	}
+}
+
+// TestIdentifyExecutableDesktopSubdirectory covers desktop installer layouts
+// that nest the executable under something other than the "app-<version>"
+// directory the previous hand-written matcher assumed.
+func TestIdentifyExecutableDesktopSubdirectory(t *testing.T) {
+	path := `C:\Users\alice\AppData\Local\AnthropicClaude\current\claude.exe`
+	if got := IdentifyExecutable(path); got != "claude-desktop" {
+		t.Errorf("IdentifyExecutable(%q) = %q, want %q", path, got, "claude-desktop")
 	}
 }
 

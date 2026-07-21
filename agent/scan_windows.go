@@ -203,12 +203,21 @@ func scanWingetPackages(fingerprint *compiledFingerprint, root, owner string) []
 
 func scanWindowsNpm(fingerprint *compiledFingerprint, home homeDir) []Installation {
 	roaming := roamingAppData(home)
+	local := localAppData(home)
 	pkg := fingerprint.npmPackagePath()
 	patterns := []string{
 		filepath.Join(roaming, "npm", "node_modules", pkg, "package.json"),
 		filepath.Join(roaming, "nvm", "*", "node_modules", pkg, "package.json"),
 		filepath.Join(roaming, "fnm", "node-versions", "*", "installation", "node_modules", pkg, "package.json"),
-		filepath.Join(localAppData(home), "Volta", "tools", "image", "packages", pkg, "lib", "node_modules", pkg, "package.json"),
+		// A Volta package image mirrors the npm prefix layout, which on Windows
+		// has no "lib" level; match both so a relocated image still resolves.
+		filepath.Join(local, "Volta", "tools", "image", "packages", pkg, "node_modules", pkg, "package.json"),
+		filepath.Join(local, "Volta", "tools", "image", "packages", pkg, "lib", "node_modules", pkg, "package.json"),
+		// pnpm groups its global packages under a store layout version.
+		filepath.Join(local, "pnpm", "global", "*", "node_modules", pkg, "package.json"),
+	}
+	for _, dir := range fingerprint.ExtraWindowsNpmDirs {
+		patterns = append(patterns, filepath.Join(local, filepath.FromSlash(dir), "node_modules", pkg, "package.json"))
 	}
 	return scanNpmPatterns(fingerprint, patterns, home.owner, nil)
 }
