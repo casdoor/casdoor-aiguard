@@ -62,11 +62,6 @@ type Fingerprint struct {
 	// slash-separated, for per-user installers that lay out their own tree
 	// rather than reusing the Programs directory.
 	WindowsUserDirs []string
-	// WindowsVersionFile is a JSON file, relative to the directory holding the
-	// launcher, whose "version" field names the installed version. Agents built
-	// on Electron ship one at resources/app/package.json. Optional: without it
-	// an installation is simply reported without a version.
-	WindowsVersionFile string
 	// HomebrewCasks lists the cask names that install this agent.
 	HomebrewCasks []string
 	// SystemPackage is the package name used by apt, rpm and apk alike.
@@ -125,10 +120,8 @@ var fingerprints = []Fingerprint{
 		DisplayName: "Cursor",
 		ExecName:    "Cursor",
 		// Cursor ships a Windows setup installer that writes the whole editor
-		// into one directory, machine-wide or per-user, and an Electron
-		// manifest inside it carries the version.
+		// into one directory, machine-wide or per-user.
 		WindowsProgramDirs: []string{"cursor"},
-		WindowsVersionFile: "resources/app/package.json",
 		HomebrewCasks:      []string{"cursor"},
 	},
 	{
@@ -145,7 +138,6 @@ var fingerprints = []Fingerprint{
 		DisplayName:        "Windsurf",
 		ExecName:           "Windsurf",
 		WindowsProgramDirs: []string{"Windsurf"},
-		WindowsVersionFile: "resources/app/package.json",
 		HomebrewCasks:      []string{"windsurf"},
 	},
 }

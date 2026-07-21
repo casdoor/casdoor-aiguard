@@ -50,7 +50,16 @@ func Scan() []Installation {
 		installations = append(installations, scanMachinePrograms(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
-	return dedupeInstallations(installations)
+
+	installations = dedupeInstallations(installations)
+	// Whatever layout an installation came from, its launcher may carry a
+	// version resource, so fall back to that rather than reporting no version.
+	for i := range installations {
+		if installations[i].Version == "" {
+			installations[i].Version = executableVersion(installations[i].Path)
+		}
+	}
+	return installations
 }
 
 func windowsHomes() []homeDir {
@@ -227,12 +236,8 @@ func scanWindowsInstallDirs(fingerprint *compiledFingerprint, root string, dirs 
 		if info, err := os.Stat(executable); err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		version := ""
-		if fingerprint.WindowsVersionFile != "" {
-			version = jsonVersion(filepath.Join(installDir, filepath.FromSlash(fingerprint.WindowsVersionFile)))
-		}
 		result = append(result, Installation{
-			Name: fingerprint.DisplayName, Version: version, Path: executable,
+			Name: fingerprint.DisplayName, Path: executable,
 			InstallMethod: method, Owner: owner,
 		})
 	}
