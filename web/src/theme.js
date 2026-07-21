@@ -27,6 +27,18 @@ export const themeToken = {
   colorWarning: "#f97316",
   colorError: "#ef4444",
   colorInfo: "#262626",
+  // The info color is near-black like the primary one, and Ant Design derives
+  // the info background and border from it, which comes out dark gray behind an
+  // info Alert. Pin the shadcn neutrals the rest of the theme already uses.
+  colorInfoBg: "#f4f4f4",
+  colorInfoBgHover: "#ebebeb",
+  colorInfoBorder: "#e4e4e7",
+  colorInfoBorderHover: "#d4d4d8",
+  colorInfoHover: "#404040",
+  colorInfoActive: "#171717",
+  colorInfoText: "#262626",
+  colorInfoTextHover: "#404040",
+  colorInfoTextActive: "#171717",
   colorTextBase: "#262626",
   colorBgBase: "#ffffff",
   colorSuccessBg: "#f0fdf4",
