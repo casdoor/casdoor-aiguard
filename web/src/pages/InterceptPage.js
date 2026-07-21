@@ -13,13 +13,17 @@
 // limitations under the License.
 
 import React, {useEffect, useState} from "react";
-import {Typography, Form, InputNumber, Switch, Select, Button, message, Alert, Space} from "antd";
+import {Typography, Form, InputNumber, Switch, Select, Button, message, Alert, Space, Divider} from "antd";
 import {DownloadOutlined} from "@ant-design/icons";
+import {Link} from "react-router-dom";
 import {getSettings, updateSettings, caCertDownloadUrl} from "../backend/api";
+import InterceptedTraffic from "./InterceptedTraffic";
 
 const {Title, Paragraph} = Typography;
 
-export default function InterceptPage() {
+// The settings form is its own component so that it can wait for /api/settings
+// without holding back the traffic table below it.
+function InterceptSettings() {
   const [settings, setSettings] = useState(null);
 
   useEffect(() => {
@@ -49,8 +53,6 @@ export default function InterceptPage() {
 
   return (
     <div>
-      <Title level={3}>Interception</Title>
-
       <Alert
         type="info"
         showIcon
@@ -96,6 +98,24 @@ export default function InterceptPage() {
       <Paragraph type="secondary" style={{marginTop: 24}}>
         See scripts/setup_iptables.sh / scripts/setup_nftables.sh (must run as root on the Linux host).
       </Paragraph>
+    </div>
+  );
+}
+
+export default function InterceptPage() {
+  return (
+    <div>
+      <Title level={3}>Interception</Title>
+      <InterceptSettings />
+
+      <Divider />
+
+      <Title level={4}>Intercepted traffic</Title>
+      <Paragraph type="secondary">
+        Every HTTP(S) exchange the proxy decrypted, newest first - expand a row for the request and response bodies.
+        Agent behaviour reported by hooks never reaches this table; that is on the <Link to="/records">Records</Link> page.
+      </Paragraph>
+      <InterceptedTraffic />
     </div>
   );
 }
