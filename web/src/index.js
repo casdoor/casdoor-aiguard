@@ -17,13 +17,17 @@ import "react-app-polyfill/stable";
 import React from "react";
 import {createRoot} from "react-dom/client";
 import {BrowserRouter} from "react-router-dom";
+import {ConfigProvider} from "antd";
 import App from "./App";
+import {themeComponents, themeToken} from "./theme";
 import "./index.css";
 
 const container = document.getElementById("root");
 const root = createRoot(container);
 root.render(
-  <BrowserRouter>
-    <App />
-  </BrowserRouter>
+  <ConfigProvider theme={{token: themeToken, components: themeComponents}}>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </ConfigProvider>
 );

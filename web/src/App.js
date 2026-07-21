@@ -26,8 +26,11 @@ import RecordsPage from "./pages/RecordsPage";
 import AccountArea from "./auth/AccountArea";
 import AuthCallback from "./auth/AuthCallback";
 import {getAccount, getAuthConfig} from "./backend/api";
+import {CasdoorLogo} from "./theme";
 
-const {Header, Sider, Content} = Layout;
+const {Header, Sider, Content, Footer} = Layout;
+
+const headerHeight = 56;
 
 const menuItems = [
   {key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link>},
@@ -63,27 +66,64 @@ function App() {
 
   return (
     <Layout style={{minHeight: "100vh"}}>
-      <Header style={{display: "flex", alignItems: "center", justifyContent: "space-between"}}>
-        <div style={{color: "#fff", fontSize: 18, fontWeight: 600}}>Casdoor AIGuard</div>
+      <Header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          height: headerHeight,
+          lineHeight: `${headerHeight}px`,
+          padding: "0 24px",
+          background: "#fff",
+          boxShadow: "0 1px 4px rgba(0, 0, 0, 0.08)",
+          position: "sticky",
+          top: 0,
+          zIndex: 99,
+        }}
+      >
+        <Link to="/" style={{display: "flex", alignItems: "center", gap: 10}}>
+          <img src={CasdoorLogo} alt="Casdoor" style={{height: 26, objectFit: "contain"}} />
+          <span style={{color: "#262626", fontSize: 18, fontWeight: 600, letterSpacing: 0.2}}>AIGuard</span>
+        </Link>
         <AccountArea authConfig={authConfig} account={account} onSignedOut={() => setAccount(null)} />
       </Header>
       <Layout>
-        <Sider width={220} theme="light">
-          <Menu mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={menuItems} style={{height: "100%"}} />
+        <Sider
+          width={220}
+          theme="light"
+          breakpoint="lg"
+          collapsedWidth={0}
+          style={{
+            position: "sticky",
+            top: headerHeight,
+            height: `calc(100vh - ${headerHeight}px)`,
+            overflow: "auto",
+            borderRight: "1px solid #f0f0f0",
+          }}
+        >
+          <Menu mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={menuItems} style={{height: "100%", borderRight: 0, paddingTop: 8}} />
         </Sider>
-        <Layout style={{padding: 24}}>
-          <Content style={{background: "#fff", padding: 24, margin: 0}}>
-            <Switch>
-              <Route exact path="/" component={DashboardPage} />
-              <Route exact path="/agents" component={AgentsPage} />
-              <Route exact path="/records" component={RecordsPage} />
-              <Route exact path="/policyhub" component={PolicyHubPage} />
-              <Route exact path="/policyhub/:name" component={PolicySetPage} />
-              <Route exact path="/intercept" component={InterceptPage} />
-              <Route exact path="/casdoor" component={CasdoorSettingsPage} />
-              <Route exact path="/callback" render={() => <AuthCallback onSignedIn={onSignedIn} />} />
-            </Switch>
+        <Layout style={{background: "#fafafa"}}>
+          <Content style={{padding: 24}}>
+            <div style={{background: "#fff", borderRadius: 8, border: "1px solid #f0f0f0", boxShadow: "0 1px 5px 0 rgba(51, 51, 51, 0.06)", padding: 24, minHeight: "100%"}}>
+              <Switch>
+                <Route exact path="/" component={DashboardPage} />
+                <Route exact path="/agents" component={AgentsPage} />
+                <Route exact path="/records" component={RecordsPage} />
+                <Route exact path="/policyhub" component={PolicyHubPage} />
+                <Route exact path="/policyhub/:name" component={PolicySetPage} />
+                <Route exact path="/intercept" component={InterceptPage} />
+                <Route exact path="/casdoor" component={CasdoorSettingsPage} />
+                <Route exact path="/callback" render={() => <AuthCallback onSignedIn={onSignedIn} />} />
+              </Switch>
+            </div>
           </Content>
+          <Footer style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "transparent", color: "#737373", padding: "16px 24px 24px"}}>
+            Powered by
+            <a target="_blank" href="https://casdoor.org" rel="noreferrer" style={{display: "inline-flex", alignItems: "center"}}>
+              <img height={20} alt="Casdoor" src={CasdoorLogo} />
+            </a>
+          </Footer>
         </Layout>
       </Layout>
     </Layout>

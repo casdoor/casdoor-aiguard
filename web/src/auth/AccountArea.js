@@ -29,7 +29,7 @@ export default function AccountArea({authConfig, account, onSignedOut}) {
   if (!authConfig.available) {
     return (
       <Tooltip title="Configure the Casdoor connection to enable login">
-        <Button type="text" disabled icon={<LoginOutlined />} style={{color: "rgba(255, 255, 255, 0.45)"}}>
+        <Button type="text" disabled icon={<LoginOutlined />}>
           Login
         </Button>
       </Tooltip>
@@ -70,7 +70,7 @@ export default function AccountArea({authConfig, account, onSignedOut}) {
 
   return (
     <Dropdown menu={{items, onClick}} placement="bottomRight">
-      <span style={{color: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8}}>
+      <span className="account-area" style={{cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, padding: "0 10px", height: 40, borderRadius: 7}}>
         <Avatar size="small" src={account.avatar} icon={<UserOutlined />} />
         {account.displayName || account.name}
       </span>
