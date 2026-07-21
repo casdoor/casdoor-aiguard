@@ -13,21 +13,56 @@
 // limitations under the License.
 
 import React, {useCallback, useEffect, useState} from "react";
-import {Alert, Button, Card, Col, Input, Row, Space, Spin, Table, Tag, Typography} from "antd";
+import {Alert, Button, Card, Col, Row, Space, Spin, Table, Tag, Typography} from "antd";
 import {ArrowLeftOutlined, PlayCircleOutlined, ReloadOutlined} from "@ant-design/icons";
 import {useHistory, useParams} from "react-router-dom";
+import CodeMirror from "@uiw/react-codemirror";
+import {EditorView} from "@codemirror/view";
 import {getPolicySet} from "../backend/api";
 import {enforce} from "../utils/casbin";
+import {CasbinConfSupport} from "../casbin-mode/casbin-conf";
+import {CasbinPolicySupport} from "../casbin-mode/casbin-csv";
 import {AgentIcon, STRICTNESS_COLORS, countPolicyRules, monospace} from "./policySetUtil";
 
 const {Title, Text, Paragraph} = Typography;
 
 const editorStyle = {fontFamily: monospace, fontSize: 12};
 
-function Editor({title, extra, value, rows, onChange}) {
+// Reuse the Casbin editor's stream modes so [sections], r/p/e/m tokens and the
+// comma-separated policy/request values are highlighted the same way here.
+const LANGUAGE_EXTENSIONS = {
+  conf: CasbinConfSupport(),
+  csv: CasbinPolicySupport(),
+};
+
+const cmTheme = EditorView.theme({
+  "&": {fontSize: "12px", backgroundColor: "#fff"},
+  ".cm-content": {fontFamily: monospace},
+  ".cm-gutters": {fontFamily: monospace, backgroundColor: "#fafafa", border: "none"},
+  "&.cm-focused": {outline: "none"},
+});
+
+function Editor({title, extra, value, rows, onChange, language}) {
+  const extensions = [cmTheme, EditorView.lineWrapping];
+  if (LANGUAGE_EXTENSIONS[language]) {
+    extensions.push(LANGUAGE_EXTENSIONS[language]);
+  }
+
   return (
-    <Card size="small" title={title} extra={extra} style={{height: "100%"}}>
-      <Input.TextArea value={value} rows={rows} onChange={(e) => onChange(e.target.value)} style={editorStyle} spellCheck={false} />
+    <Card size="small" title={title} extra={extra} style={{height: "100%"}} styles={{body: {padding: 0}}}>
+      <CodeMirror
+        value={value}
+        onChange={onChange}
+        extensions={extensions}
+        minHeight={`${rows * 1.6}em`}
+        basicSetup={{
+          lineNumbers: true,
+          highlightActiveLine: true,
+          bracketMatching: true,
+          foldGutter: false,
+          highlightActiveLineGutter: true,
+        }}
+      />
     </Card>
   );
 }
@@ -175,7 +210,7 @@ export default function PolicySetPage() {
 
       <Row gutter={[16, 16]} style={{marginTop: 20}}>
         <Col xs={24} lg={12}>
-          <Editor title="Casbin model" value={model} rows={18} onChange={setModel} />
+          <Editor title="Casbin model" value={model} rows={18} onChange={setModel} language="conf" />
         </Col>
         <Col xs={24} lg={12}>
           <Row gutter={[16, 16]}>
@@ -186,6 +221,7 @@ export default function PolicySetPage() {
                 value={policy}
                 rows={9}
                 onChange={setPolicy}
+                language="csv"
               />
             </Col>
             <Col span={24}>
@@ -195,6 +231,7 @@ export default function PolicySetPage() {
                 value={request}
                 rows={7}
                 onChange={setRequest}
+                language="csv"
               />
             </Col>
           </Row>
