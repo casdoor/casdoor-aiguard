@@ -46,11 +46,29 @@ type Record struct {
 	// What happened. EventType and Action mirror the agent's own event
 	// vocabulary (for OpenClaw, "message"/"received"), so a record stays
 	// recognizable to someone reading the agent's documentation.
-	EventType  string `json:"eventType"`
-	Action     string `json:"action"`
+	EventType string `json:"eventType"`
+	Action    string `json:"action"`
+	// Outcome is a normalized result shared by agent hook records:
+	// attempted, success, failure or denied. It stays empty for lifecycle
+	// events where a result would be misleading.
+	Outcome    string `json:"outcome,omitempty"`
 	SessionKey string `json:"sessionKey,omitempty"`
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
+
+	// Correlation and operation identity emitted by agent hooks. Keeping them as
+	// first-class fields makes the Records page useful without coupling it to a
+	// particular hook's raw payload shape.
+	PromptId  string `json:"promptId,omitempty"`
+	ToolUseId string `json:"toolUseId,omitempty"`
+	ToolName  string `json:"toolName,omitempty"`
+	McpServer string `json:"mcpServer,omitempty"`
+	McpTool   string `json:"mcpTool,omitempty"`
+
+	// Model and duration are retained when the hook supplies them. No model API
+	// request or response bodies are collected.
+	Model      string `json:"model,omitempty"`
+	DurationMs int64  `json:"durationMs,omitempty"`
 
 	// Object is the event payload as JSON, and Detail a human-readable note.
 	Object string `json:"object,omitempty"`
@@ -84,6 +102,9 @@ type Record struct {
 	Feedback     string `json:"feedback,omitempty"`
 	FeedbackBy   string `json:"feedbackBy,omitempty"`
 	FeedbackTime string `json:"feedbackTime,omitempty"`
+	// Correctable is the API representation of IsCorrectable, so clients do
+	// not have to duplicate the resource-and-intent rule.
+	Correctable bool `json:"correctable"`
 }
 
 // The three states of a record's Feedback field. FeedbackNone is the empty
@@ -125,6 +146,7 @@ func (r *Record) normalize() {
 	if !r.IsTriggered {
 		r.IsAllowed = true
 	}
+	r.Correctable = r.IsCorrectable()
 	if len(r.Object) > maxRecordObjectBytes {
 		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"
 	}

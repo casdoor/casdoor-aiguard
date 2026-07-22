@@ -73,7 +73,7 @@ agent, and one record on the Records page.
   │  patch/       instrument one through its own extension point:          │
   │                 • OpenClaw       → a hook in its hook directory        │
   │                 • Claude Desktop → aiguard registered as an MCP server │
-  │               every edit is journalled, so Unpatch restores the host   │
+  │               shared settings are edited without replacing user data   │
   │  the patched agent then posts each operation to aiguard before doing   │
   │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
   └────────────────────────────────────────────────────────────────────────┘
@@ -130,10 +130,10 @@ heard of.
 
 ![Agents](docs/images/agents.png)
 
-**Patch** instruments an installation; **Unpatch** puts the host back exactly as
-it was. Every edit a patcher makes is journalled to `data/patches/` with the
-original file contents, so undoing is replaying that journal backwards rather
-than guessing.
+**Patch** instruments an installation; **Unpatch** removes that instrumentation.
+File-based patchers keep backups in `data/patches/`. Claude Code edits its shared
+settings file in place and Unpatch removes only aiguard's current hook handlers,
+so other settings and hooks remain untouched.
 
 How an agent is instrumented is agent-specific, so each agent supplies its own
 patcher (`patch/`):
@@ -142,19 +142,44 @@ patcher (`patch/`):
 |-------|---------------------|--------|
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
 | **Claude Desktop** | aiguard registers *itself* as an MCP server in `claude_desktop_config.json` and serves MCP over stdio (`mcpserver/`) | supported |
-| Claude Code | `hooks` block in `~/.claude/settings.json` | planned |
+| **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
 | Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
 Adding an agent means writing one `patch.Patcher` and registering it; nothing
 else in aiguard changes.
 
+### Claude Code hooks
+
+The Claude Code patch incrementally edits the user-level
+`~/.claude/settings.json`. It preserves unrelated settings and hooks, refreshes
+its existing handlers when the aiguard executable, records URL or handler
+options change, and removes only its own handlers during Unpatch. An empty
+settings file is treated as `{}`.
+
+Each asynchronous handler launches `aiguard agent-hook --agent claude-code` and
+reports session, prompt, tool/MCP, permission, subagent, compaction and stop
+events without changing Claude Code's execution decisions. Status validates the
+installed command and arguments against the current aiguard process and reports
+when Patch must refresh them.
+
+Project `.claude/settings.json` and `settings.local.json` files are outside the
+current user-level patch scope. Hook payloads are recursively redacted and
+capped at 64 KiB; sensitive reads and writes hide file contents while retaining
+the operation metadata needed by the audit trail.
+
 ## Records
 
-A record is what an agent says it did, pushed from the hook aiguard installed
-inside it. Records cover behaviour interception can never see — a local tool
-call, a session reset — and carry the verdict aiguard gave when the operation
-went through `/api/enforce`: which policy set ruled, whether it was allowed, and
-the one-line reason a block happened.
+A record is what an agent says it did, pushed from an installed hook. Records
+cover behaviour interception can never see — a local tool call or a session
+reset — and carry a verdict only when the operation went through `/api/enforce`:
+which policy set ruled, whether it was allowed, and the one-line reason a block
+happened.
+
+Claude Code records are audit-only: they do not call Casbin, block execution,
+or populate `Resource`, `Intent` or `PolicySet`, so the UI shows them as
+**logged** and does not offer feedback learning. Hook payloads are recursively
+redacted and capped at 64 KiB before leaving the hook process. Transcript paths,
+assistant response text and compaction summaries are not stored.
 
 ![Records](docs/images/records.png)
 
@@ -280,7 +305,7 @@ overridden by an environment variable of the same name):
 | `policyFile` | `./conf/policy.yaml` | interception rule file |
 | `auditLogFile` | `./logs/audit.log` | append-only JSONL audit log of intercepted events |
 | `recordLogFile` | `./logs/record.log` | append-only JSONL log of agent behaviour records |
-| `patchStateDir` | `./data/patches` | patch manifests + file backups that make Unpatch exact |
+| `patchStateDir` | `./data/patches` | patch manifests and file backups used by file-based patchers |
 | `recordsIngestUrl` | *(empty)* | endpoint baked into installed hooks; set it when the agent runs in a container or WSL |
 | `casdoorEndpoint` | `http://localhost:8000` | Casdoor base URL |
 | `casdoorClientId` / `casdoorClientSecret` | *(empty)* | aiguard's own client credentials |
@@ -337,7 +362,8 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
   identified is passed through untouched (`passthroughUnrecognized = true`), so
   the interception layer never takes down all host traffic.
 - **A stopped aiguard never breaks an agent.** A patched agent that cannot reach
-  `/api/enforce` treats the missing answer as allow.
+  `/api/enforce` treats the missing answer as allow, and Claude Code audit hooks
+  always exit successfully even when record delivery fails.
 - **A call no enabled policy set denies is allowed.** Enabling a set is what adds
   enforcement; nothing is blocked by accident.
 - **Step-up defaults to deny** while CIBA is stubbed (`stepUpDefaultAction = deny`).
@@ -350,7 +376,7 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/auth-config` · `POST /api/signin` · `POST /api/signout` · `GET /api/account` | optional Casdoor operator login |
 | `GET /api/agents` | AI agents installed on this host, with patch status |
 | `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
-| `GET /api/records` · `POST /api/records` | behaviour records (read; ingest from a patched agent) |
+| `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`; ingest one hook record) |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
 | `POST /api/enforce` | rule on one agent operation and record it |
 | `GET /api/events` | most recent intercepted egress events, newest first |
@@ -369,8 +395,10 @@ All responses use Casdoor's `{ "status": "ok", "msg": "", "data": ... }` envelop
 main.go                 bootstrap: settings, policy, audit, CA, proxy, web
 conf/                   app.conf, policy.yaml, config helpers
 agent/                  per-OS scanners + fingerprints of known AI agents
-patch/                  per-agent instrumentation + exact-undo journal
+patch/                  per-agent instrumentation and file backup journal
 mcpserver/              aiguard as an MCP server (how Claude Desktop is patched)
+agenthook/              shared command-hook normalizer and reporter
+auditutil/              shared payload redaction and size boundary
 object/                 domain models: policy sets, Casbin enforcement, records,
                         events, settings, audit, self-learning
 recognizers/            pluggable intent recognizers (MCP, LLM, payment)

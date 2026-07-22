@@ -19,6 +19,7 @@ import (
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
+	"github.com/casdoor/casdoor-aiguard/agenthook"
 	"github.com/casdoor/casdoor-aiguard/auth"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/mcpserver"
@@ -29,6 +30,9 @@ import (
 )
 
 func main() {
+	// Records and exits when an agent launched this binary as a command hook.
+	agenthook.ServeIfInvoked()
+
 	// Serves and exits when an agent launched this binary as its MCP server.
 	mcpserver.ServeIfInvoked()
 

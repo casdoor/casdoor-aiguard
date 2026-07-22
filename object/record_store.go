@@ -155,10 +155,24 @@ func CorrectedRecords() []*Record {
 	return result
 }
 
-// ListRecords returns up to `limit` most recent records, newest first. An empty
-// agent means every agent; limit <= 0 means all. The result is never nil, so the
-// API reports an empty list rather than null.
+// RecordFilter narrows the Records page without changing the append-only store.
+// Every field is optional and matching is case-insensitive.
+type RecordFilter struct {
+	Agent     string
+	EventType string
+	Outcome   string
+}
+
+// ListRecords returns up to `limit` most recent records, newest first. It is
+// retained as the small compatibility wrapper used by self-learning code.
 func ListRecords(agent string, limit int) []*Record {
+	return ListRecordsFiltered(RecordFilter{Agent: agent}, limit)
+}
+
+// ListRecordsFiltered returns up to limit records matching filter, newest
+// first. limit <= 0 means all. The result is never nil, so the API reports an
+// empty list rather than null.
+func ListRecordsFiltered(filter RecordFilter, limit int) []*Record {
 	records.mutex.RLock()
 	defer records.mutex.RUnlock()
 
@@ -174,7 +188,13 @@ func ListRecords(agent string, limit int) []*Record {
 	for i := 0; i < records.size && len(result) < limit; i++ {
 		index := (records.head - 1 - i + recordRingCapacity) % recordRingCapacity
 		record := records.records[index]
-		if agent != "" && !strings.EqualFold(record.Agent, agent) {
+		if filter.Agent != "" && !strings.EqualFold(record.Agent, filter.Agent) {
+			continue
+		}
+		if filter.EventType != "" && !strings.EqualFold(record.EventType, filter.EventType) {
+			continue
+		}
+		if filter.Outcome != "" && !strings.EqualFold(record.Outcome, filter.Outcome) {
 			continue
 		}
 		result = append(result, record)

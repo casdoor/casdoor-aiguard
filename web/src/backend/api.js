@@ -66,8 +66,9 @@ export function unpatchAgent(target) {
   return request("/api/agents/unpatch", {method: "POST", body: JSON.stringify(target)});
 }
 
-export function getRecords(agent = "", limit = 200) {
-  return request(`/api/records?agent=${encodeURIComponent(agent)}&limit=${limit}`);
+export function getRecords(agent = "", limit = 200, eventType = "", outcome = "") {
+  const params = new URLSearchParams({agent, limit: String(limit), eventType, outcome});
+  return request(`/api/records?${params.toString()}`);
 }
 
 // Corrects the verdict on one record: feedback is "allow", "deny", or "" to
