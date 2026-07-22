@@ -22,7 +22,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/casdoor/casdoor-aiguard/claudecodehook"
+	"github.com/casdoor/casdoor-aiguard/agenthook"
 	"github.com/casdoor/casdoor-aiguard/conf"
 )
 
@@ -135,7 +135,8 @@ func (p claudeCodePatcher) hookCommand(target Target) (string, []string, error) 
 		return "", nil, fmt.Errorf("cannot resolve the aiguard binary to register: %w", err)
 	}
 	return executable, []string{
-		claudecodehook.Subcommand,
+		agenthook.Subcommand,
+		"--agent", p.AgentId(),
 		"--records-url", conf.GetRecordsIngestUrl(),
 		"--agent-path", target.Path,
 	}, nil
@@ -269,7 +270,10 @@ func isAiguardHookHandler(handler map[string]any) bool {
 		return false
 	}
 	arguments := stringArrayValue(handler["args"])
-	return len(arguments) > 0 && arguments[0] == claudecodehook.Subcommand && slices.Contains(arguments, "--records-url")
+	agentFlag := slices.Index(arguments, "--agent")
+	return len(arguments) > 0 && arguments[0] == agenthook.Subcommand &&
+		agentFlag >= 0 && agentFlag+1 < len(arguments) && arguments[agentFlag+1] == "claude-code" &&
+		slices.Contains(arguments, "--records-url")
 }
 
 // removeClaudeCodeHooks strips only aiguard command handlers from the current

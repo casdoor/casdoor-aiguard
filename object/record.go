@@ -56,9 +56,9 @@ type Record struct {
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
 
-	// Correlation and operation identity emitted by Claude Code hooks. Keeping
-	// them as first-class fields makes the Records page useful without coupling
-	// it to the hook's raw payload shape.
+	// Correlation and operation identity emitted by agent hooks. Keeping them as
+	// first-class fields makes the Records page useful without coupling it to a
+	// particular hook's raw payload shape.
 	PromptId  string `json:"promptId,omitempty"`
 	ToolUseId string `json:"toolUseId,omitempty"`
 	ToolName  string `json:"toolName,omitempty"`
