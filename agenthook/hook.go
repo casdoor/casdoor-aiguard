@@ -216,24 +216,28 @@ func parseMcpTool(name string, prefix string) (string, string, bool) {
 }
 
 func preparePayload(profile hookProfile, event map[string]any, toolName string) map[string]any {
-	copy := make(map[string]any, len(event))
+	payload := make(map[string]any, len(event))
 	for key, value := range event {
 		if _, omit := profile.omitFields[key]; omit {
 			continue
 		}
 		if _, lengthOnly := profile.lengthFields[key]; lengthOnly {
-			copy[key+"_length"] = len(stringValue(value))
+			payload[key+"_length"] = len(stringValue(value))
 			continue
 		}
-		copy[key] = auditutil.SanitizeValue(key, value)
+		if key == profile.toolInputField {
+			payload[key] = auditutil.SanitizeToolInput(toolName, value)
+			continue
+		}
+		payload[key] = auditutil.SanitizeValue(key, value)
 	}
 
 	if profile.toolInputField != "" && auditutil.IsSensitiveRead(toolName, event[profile.toolInputField]) {
-		if _, ok := copy[profile.toolOutputField]; ok {
-			copy[profile.toolOutputField] = "[REDACTED: sensitive file content]"
+		if _, ok := payload[profile.toolOutputField]; ok {
+			payload[profile.toolOutputField] = "[REDACTED: sensitive file content]"
 		}
 	}
-	return copy
+	return payload
 }
 
 func encodePayload(payload map[string]any) string {
@@ -246,17 +250,10 @@ func stringValue(value any) string {
 }
 
 func int64Value(value any) int64 {
-	switch typed := value.(type) {
-	case json.Number:
-		result, _ := typed.Int64()
-		return result
-	case float64:
-		return int64(typed)
-	case int64:
-		return typed
-	case int:
-		return int64(typed)
-	default:
+	number, ok := value.(json.Number)
+	if !ok {
 		return 0
 	}
+	result, _ := number.Int64()
+	return result
 }

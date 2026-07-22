@@ -18,7 +18,7 @@ package auditutil
 
 import (
 	"encoding/json"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -79,22 +79,73 @@ func SanitizeString(value string) string {
 	return credentialPattern.ReplaceAllString(value, "[REDACTED]")
 }
 
+// SanitizeToolInput hides content written to a sensitive file while retaining
+// the operation metadata needed to understand the audit record.
+func SanitizeToolInput(toolName string, input any) any {
+	sanitized := SanitizeValue("", input)
+	if !isSensitiveWrite(toolName) || !hasSensitivePath(input) {
+		return sanitized
+	}
+	inputMap, ok := sanitized.(map[string]any)
+	if !ok {
+		return sanitized
+	}
+	for key := range inputMap {
+		normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
+		switch normalized {
+		case "content", "oldstring", "newstring":
+			inputMap[key] = "[REDACTED: sensitive file content]"
+		}
+	}
+	return inputMap
+}
+
 // IsSensitiveRead identifies file-read operations whose result must be hidden
 // in full even if its individual fields do not look like secrets.
 func IsSensitiveRead(toolName string, input any) bool {
-	if toolName != "Read" && toolName != "read_file" && !strings.HasSuffix(toolName, "__read_file") {
+	normalizedTool := strings.ToLower(toolName)
+	if normalizedTool == "bash" || strings.HasSuffix(normalizedTool, "__bash") {
+		inputMap, ok := input.(map[string]any)
+		if !ok {
+			return false
+		}
+		for _, token := range strings.Fields(stringValue(inputMap["command"])) {
+			if isSensitivePath(strings.Trim(token, "\"'`;|&()<>")) {
+				return true
+			}
+		}
 		return false
 	}
-	object, ok := input.(map[string]any)
+	if normalizedTool != "read" && normalizedTool != "read_file" && !strings.HasSuffix(normalizedTool, "__read_file") {
+		return false
+	}
+	return hasSensitivePath(input)
+}
+
+func isSensitiveWrite(toolName string) bool {
+	normalized := strings.ToLower(toolName)
+	return normalized == "write" || normalized == "edit" || normalized == "write_file" || normalized == "edit_file" ||
+		strings.HasSuffix(normalized, "__write_file") || strings.HasSuffix(normalized, "__edit_file")
+}
+
+func hasSensitivePath(input any) bool {
+	inputMap, ok := input.(map[string]any)
 	if !ok {
 		return false
 	}
-	path := stringValue(object["file_path"])
-	if path == "" {
-		path = stringValue(object["path"])
+	filePath := stringValue(inputMap["file_path"])
+	if filePath == "" {
+		filePath = stringValue(inputMap["path"])
 	}
-	normalized := strings.ToLower(strings.ReplaceAll(filepath.ToSlash(path), `\`, "/"))
-	base := filepath.Base(normalized)
+	return isSensitivePath(filePath)
+}
+
+func isSensitivePath(filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+	normalized := strings.ToLower(strings.ReplaceAll(filePath, `\`, "/"))
+	base := path.Base(normalized)
 	if strings.HasPrefix(base, ".env") && base != ".env.example" && base != ".env.sample" && base != ".env.template" {
 		return true
 	}
@@ -118,11 +169,11 @@ func EncodeBoundedJSON(value any, maximum int) string {
 	if len(encoded) <= maximum {
 		return string(encoded)
 	}
-	previewBytes := encoded[:maximum/3]
+	preview := strings.ToValidUTF8(string(encoded[:maximum/3]), "")
 	truncated, err := json.Marshal(map[string]any{
 		"truncated":     true,
 		"originalBytes": len(encoded),
-		"preview":       string(previewBytes),
+		"preview":       preview,
 	})
 	if err != nil {
 		return ""

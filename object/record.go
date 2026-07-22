@@ -102,6 +102,9 @@ type Record struct {
 	Feedback     string `json:"feedback,omitempty"`
 	FeedbackBy   string `json:"feedbackBy,omitempty"`
 	FeedbackTime string `json:"feedbackTime,omitempty"`
+	// Correctable is the API representation of IsCorrectable, so clients do
+	// not have to duplicate the resource-and-intent rule.
+	Correctable bool `json:"correctable"`
 }
 
 // The three states of a record's Feedback field. FeedbackNone is the empty
@@ -143,6 +146,7 @@ func (r *Record) normalize() {
 	if !r.IsTriggered {
 		r.IsAllowed = true
 	}
+	r.Correctable = r.IsCorrectable()
 	if len(r.Object) > maxRecordObjectBytes {
 		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"
 	}

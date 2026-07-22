@@ -58,7 +58,7 @@ function FeedbackCell({record, onChanged}) {
 
   // Only an operation the enforcer ruled on carries the Casbin triple a rule
   // would be written about; everything else was merely logged.
-  if (!record.resource || !record.intent) {
+  if (!record.correctable) {
     return (
       <Tooltip title="This record was only logged, not ruled on, so there is no decision to correct.">
         <Text type="secondary">—</Text>
@@ -271,7 +271,7 @@ export default function RecordsPage() {
       title: "Verdict",
       key: "verdict",
       render: (_, record) => {
-        if (!record.resource || !record.intent) {
+        if (!record.correctable) {
           return <Text type="secondary">logged</Text>;
         }
         return record.isAllowed ? <Tag color="green">allowed</Tag> : <Tag color="red">blocked</Tag>;

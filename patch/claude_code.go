@@ -102,6 +102,10 @@ func (p claudeCodePatcher) Status(target Target) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	hookCommand, hookArguments, err := p.hookCommand(target)
+	if err != nil {
+		return Status{}, err
+	}
 	config, _, exists, err := readClaudeCodeConfig(configPath)
 	if err != nil {
 		return Status{}, err
@@ -110,15 +114,16 @@ func (p claudeCodePatcher) Status(target Target) (Status, error) {
 		return Status{Detail: "not patched"}, nil
 	}
 
-	hookState := claudeCodeHooksState(config)
-	if hookState == 0 {
+	owned, current := claudeCodeHooksState(config, hookCommand, hookArguments)
+	if owned == 0 {
 		return Status{Detail: "not patched"}, nil
 	}
-	if hookState < len(claudeCodeHookEvents) {
-		return Status{Detail: fmt.Sprintf("Claude Code hooks are incomplete (%d/%d active)", hookState, len(claudeCodeHookEvents))}, nil
+	if current < len(claudeCodeHookEvents) {
+		return Status{Detail: fmt.Sprintf("user settings hooks need refresh (%d/%d installed, %d/%d current)",
+			owned, len(claudeCodeHookEvents), current, len(claudeCodeHookEvents))}, nil
 	}
 
-	return Status{Patched: true, Detail: "Hooks active"}, nil
+	return Status{Patched: true, Detail: "User settings hooks active"}, nil
 }
 
 func (claudeCodePatcher) configPath(target Target) (string, error) {
@@ -156,7 +161,7 @@ func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error
 	}
 	config := map[string]any{}
 	if len(strings.TrimSpace(string(data))) == 0 {
-		return nil, 0, false, fmt.Errorf("cannot parse %s: empty file", path)
+		return config, info.Mode().Perm(), true, nil
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, 0, false, fmt.Errorf("cannot parse %s: %w", path, err)
@@ -188,29 +193,90 @@ func installClaudeCodeHooks(config map[string]any, command string, arguments []s
 
 	changed := false
 	for _, eventName := range claudeCodeHookEvents {
-		if eventHasAiguardHook(hooks[eventName]) {
-			continue
-		}
 		rawGroups, eventExists := hooks[eventName]
 		groups, ok := rawGroups.([]any)
 		if eventExists && !ok {
 			return false, fmt.Errorf("hooks.%s must be a JSON array", eventName)
 		}
-		handler := map[string]any{
-			"type":    "command",
-			"command": command,
-			"args":    arguments,
-			"async":   true,
-			"timeout": claudeCodeHookTimeoutSeconds,
+		groups, eventChanged, found := mergeClaudeCodeHook(groups, command, arguments)
+		if !found {
+			group := map[string]any{"hooks": []any{newClaudeCodeHookHandler(command, arguments)}}
+			if hookEventSupportsMatcher(eventName) {
+				group["matcher"] = ""
+			}
+			groups = append(groups, group)
+			eventChanged = true
 		}
-		group := map[string]any{"hooks": []any{handler}}
-		if hookEventSupportsMatcher(eventName) {
-			group["matcher"] = ""
+		if eventChanged {
+			hooks[eventName] = groups
+			changed = true
 		}
-		hooks[eventName] = append(groups, group)
-		changed = true
 	}
 	return changed, nil
+}
+
+func newClaudeCodeHookHandler(command string, arguments []string) map[string]any {
+	return map[string]any{
+		"type":    "command",
+		"command": command,
+		"args":    arguments,
+		"async":   true,
+		"timeout": claudeCodeHookTimeoutSeconds,
+	}
+}
+
+// mergeClaudeCodeHook refreshes the first owned handler in place and removes
+// duplicates. Handler identity deliberately ignores mutable configuration;
+// command, URL, async and timeout drift are corrected instead of being mistaken
+// for a different handler.
+func mergeClaudeCodeHook(groups []any, command string, arguments []string) ([]any, bool, bool) {
+	result := make([]any, 0, len(groups))
+	found := false
+	changed := false
+
+	for _, rawGroup := range groups {
+		group, ok := objectValue(rawGroup)
+		if !ok {
+			result = append(result, rawGroup)
+			continue
+		}
+		handlers, ok := group["hooks"].([]any)
+		if !ok {
+			result = append(result, rawGroup)
+			continue
+		}
+
+		kept := make([]any, 0, len(handlers))
+		groupChanged := false
+		for _, rawHandler := range handlers {
+			handler, ok := objectValue(rawHandler)
+			if !ok || !isAiguardHookHandler(handler) {
+				kept = append(kept, rawHandler)
+				continue
+			}
+			if found {
+				changed = true
+				groupChanged = true
+				continue
+			}
+			found = true
+			if claudeCodeHookHandlerCurrent(handler, command, arguments) {
+				kept = append(kept, rawHandler)
+				continue
+			}
+			kept = append(kept, newClaudeCodeHookHandler(command, arguments))
+			changed = true
+			groupChanged = true
+		}
+		if len(kept) == 0 && groupChanged {
+			continue
+		}
+		if groupChanged {
+			group["hooks"] = kept
+		}
+		result = append(result, rawGroup)
+	}
+	return result, changed, found
 }
 
 func hookEventSupportsMatcher(eventName string) bool {
@@ -222,25 +288,32 @@ func hookEventSupportsMatcher(eventName string) bool {
 	}
 }
 
-func claudeCodeHooksState(config map[string]any) int {
+func claudeCodeHooksState(config map[string]any, command string, arguments []string) (int, int) {
 	hooks, ok := objectValue(config["hooks"])
 	if !ok {
-		return 0
+		return 0, 0
 	}
-	active := 0
+	owned := 0
+	current := 0
 	for _, eventName := range claudeCodeHookEvents {
-		if eventHasAiguardHook(hooks[eventName]) {
-			active++
+		eventOwned, eventCurrent := claudeCodeHookState(hooks[eventName], command, arguments)
+		if eventOwned {
+			owned++
+		}
+		if eventCurrent {
+			current++
 		}
 	}
-	return active
+	return owned, current
 }
 
-func eventHasAiguardHook(value any) bool {
+func claudeCodeHookState(value any, command string, arguments []string) (bool, bool) {
 	groups, ok := value.([]any)
 	if !ok {
-		return false
+		return false, false
 	}
+	owned := 0
+	current := false
 	for _, rawGroup := range groups {
 		group, ok := objectValue(rawGroup)
 		if !ok {
@@ -255,13 +328,13 @@ func eventHasAiguardHook(value any) bool {
 			if !ok || !isAiguardHookHandler(handler) {
 				continue
 			}
-			asynchronous, _ := handler["async"].(bool)
-			if asynchronous && numberMapValue(handler, "timeout") == claudeCodeHookTimeoutSeconds {
-				return true
+			owned++
+			if claudeCodeHookHandlerCurrent(handler, command, arguments) {
+				current = true
 			}
 		}
 	}
-	return false
+	return owned > 0, owned == 1 && current
 }
 
 func isAiguardHookHandler(handler map[string]any) bool {
@@ -274,6 +347,14 @@ func isAiguardHookHandler(handler map[string]any) bool {
 	return len(arguments) > 0 && arguments[0] == agenthook.Subcommand &&
 		agentFlag >= 0 && agentFlag+1 < len(arguments) && arguments[agentFlag+1] == "claude-code" &&
 		slices.Contains(arguments, "--records-url")
+}
+
+func claudeCodeHookHandlerCurrent(handler map[string]any, command string, arguments []string) bool {
+	configuredCommand, _ := handler["command"].(string)
+	asynchronous, _ := handler["async"].(bool)
+	return isAiguardHookHandler(handler) && configuredCommand == command &&
+		slices.Equal(stringArrayValue(handler["args"]), arguments) && asynchronous &&
+		numberMapValue(handler, "timeout") == claudeCodeHookTimeoutSeconds
 }
 
 // removeClaudeCodeHooks strips only aiguard command handlers from the current
