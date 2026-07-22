@@ -19,9 +19,9 @@
 // How an agent is instrumented is entirely agent-specific - OpenClaw takes a
 // hook directory plus a config entry, Claude Code takes hook commands in its
 // settings file - so each agent supplies its own Patcher. What every agent
-// shares is the contract in this file and the undo bookkeeping in state.go: a
-// patcher describes its edits through a ChangeSet, and Unpatch replays that
-// record backwards to put the host back exactly as it was.
+// shares is the contract in this file. File-based patchers can use the backup
+// journal in state.go; patchers that edit shared settings can remove only the
+// entries they own.
 //
 // Adding an agent means writing one Patcher and registering it; nothing else in
 // aiguard needs to change.
@@ -71,11 +71,10 @@ type Patcher interface {
 	Supported() bool
 	// Status probes the target and reports whether it is currently patched.
 	Status(target Target) (Status, error)
-	// Patch installs the agent's hooks. Every filesystem change must go
-	// through the ChangeSet so Unpatch can undo it.
+	// Patch installs or refreshes the agent's hooks.
 	Patch(target Target) error
-	// Unpatch removes everything Patch installed, restoring modified files to
-	// their pre-patch content.
+	// Unpatch removes everything Patch installed. Patchers that edit shared,
+	// mergeable settings must preserve unrelated changes made later.
 	Unpatch(target Target) error
 }
 

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/casdoor/casdoor-aiguard/claudecodehook"
@@ -64,28 +65,36 @@ func (p claudeCodePatcher) Patch(target Target) error {
 		return err
 	}
 
-	return Apply(target, func(changes *ChangeSet) error {
-		if err := changes.MkdirAll(filepath.Dir(configPath)); err != nil {
-			return err
-		}
-		config, err := readJSONObject(changes, configPath)
-		if err != nil {
-			return err
-		}
-		if err := installClaudeCodeHooks(config, hookCommand, hookArguments); err != nil {
-			return fmt.Errorf("cannot merge Claude Code hooks: %w", err)
-		}
-
-		updated, err := json.MarshalIndent(config, "", "  ")
-		if err != nil {
-			return err
-		}
-		return changes.WriteFile(configPath, append(updated, '\n'), 0o600)
-	})
+	config, mode, _, err := readClaudeCodeConfig(configPath)
+	if err != nil {
+		return err
+	}
+	changed, err := installClaudeCodeHooks(config, hookCommand, hookArguments)
+	if err != nil {
+		return fmt.Errorf("cannot merge Claude Code hooks: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return err
+	}
+	return writeClaudeCodeConfig(configPath, config, mode)
 }
 
-func (claudeCodePatcher) Unpatch(target Target) error {
-	return Revert(target)
+func (p claudeCodePatcher) Unpatch(target Target) error {
+	configPath, err := p.configPath(target)
+	if err != nil {
+		return err
+	}
+	config, mode, exists, err := readClaudeCodeConfig(configPath)
+	if err != nil || !exists {
+		return err
+	}
+	if !removeClaudeCodeHooks(config) {
+		return nil
+	}
+	return writeClaudeCodeConfig(configPath, config, mode)
 }
 
 func (p claudeCodePatcher) Status(target Target) (Status, error) {
@@ -93,16 +102,12 @@ func (p claudeCodePatcher) Status(target Target) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	data, err := os.ReadFile(configPath)
-	if os.IsNotExist(err) {
-		return Status{Detail: "not patched"}, nil
-	}
+	config, _, exists, err := readClaudeCodeConfig(configPath)
 	if err != nil {
 		return Status{}, err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return Status{}, fmt.Errorf("cannot parse %s: %w", configPath, err)
+	if !exists {
+		return Status{Detail: "not patched"}, nil
 	}
 
 	hookState := claudeCodeHooksState(config)
@@ -113,11 +118,7 @@ func (p claudeCodePatcher) Status(target Target) (Status, error) {
 		return Status{Detail: fmt.Sprintf("Claude Code hooks are incomplete (%d/%d active)", hookState, len(claudeCodeHookEvents))}, nil
 	}
 
-	detail := "Hooks active"
-	if !IsApplied(target) {
-		detail += "; patched outside aiguard, so unpatch cannot restore the original settings"
-	}
-	return Status{Patched: true, Detail: detail}, nil
+	return Status{Patched: true, Detail: "Hooks active"}, nil
 }
 
 func (claudeCodePatcher) configPath(target Target) (string, error) {
@@ -140,23 +141,59 @@ func (p claudeCodePatcher) hookCommand(target Target) (string, []string, error) 
 	}, nil
 }
 
-func installClaudeCodeHooks(config map[string]any, command string, arguments []string) error {
-	hooks, ok := objectValue(config["hooks"])
-	if config["hooks"] != nil && !ok {
-		return fmt.Errorf("hooks must be a JSON object")
+func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]any{}, 0o600, false, nil
 	}
-	if !ok {
+	if err != nil {
+		return nil, 0, false, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	config := map[string]any{}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil, 0, false, fmt.Errorf("cannot parse %s: empty file", path)
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, 0, false, fmt.Errorf("cannot parse %s: %w", path, err)
+	}
+	if config == nil {
+		return nil, 0, false, fmt.Errorf("cannot parse %s: root must be a JSON object", path)
+	}
+	return config, info.Mode().Perm(), true, nil
+}
+
+func writeClaudeCodeConfig(path string, config map[string]any, mode os.FileMode) error {
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(updated, '\n'), mode)
+}
+
+func installClaudeCodeHooks(config map[string]any, command string, arguments []string) (bool, error) {
+	rawHooks, hooksExist := config["hooks"]
+	hooks, ok := objectValue(rawHooks)
+	if hooksExist && !ok {
+		return false, fmt.Errorf("hooks must be a JSON object")
+	}
+	if !hooksExist {
 		hooks = map[string]any{}
 		config["hooks"] = hooks
 	}
 
+	changed := false
 	for _, eventName := range claudeCodeHookEvents {
 		if eventHasAiguardHook(hooks[eventName]) {
 			continue
 		}
-		groups, ok := arrayValue(hooks[eventName])
-		if hooks[eventName] != nil && !ok {
-			return fmt.Errorf("hooks.%s must be a JSON array", eventName)
+		rawGroups, eventExists := hooks[eventName]
+		groups, ok := rawGroups.([]any)
+		if eventExists && !ok {
+			return false, fmt.Errorf("hooks.%s must be a JSON array", eventName)
 		}
 		handler := map[string]any{
 			"type":    "command",
@@ -170,8 +207,9 @@ func installClaudeCodeHooks(config map[string]any, command string, arguments []s
 			group["matcher"] = ""
 		}
 		hooks[eventName] = append(groups, group)
+		changed = true
 	}
-	return nil
+	return changed, nil
 }
 
 func hookEventSupportsMatcher(eventName string) bool {
@@ -198,7 +236,7 @@ func claudeCodeHooksState(config map[string]any) int {
 }
 
 func eventHasAiguardHook(value any) bool {
-	groups, ok := arrayValue(value)
+	groups, ok := value.([]any)
 	if !ok {
 		return false
 	}
@@ -207,22 +245,17 @@ func eventHasAiguardHook(value any) bool {
 		if !ok {
 			continue
 		}
-		handlers, ok := arrayValue(group["hooks"])
+		handlers, ok := group["hooks"].([]any)
 		if !ok {
 			continue
 		}
 		for _, rawHandler := range handlers {
 			handler, ok := objectValue(rawHandler)
-			if !ok || stringMapValue(handler, "type") != "command" {
+			if !ok || !isAiguardHookHandler(handler) {
 				continue
 			}
-			command := stringMapValue(handler, "command")
-			arguments := stringArrayValue(handler["args"])
-			execForm := len(arguments) > 0 && arguments[0] == claudecodehook.Subcommand && stringSliceContains(arguments, "--records-url")
-			legacyShellForm := strings.Contains(command, claudecodehook.Subcommand) && strings.Contains(command, "--records-url")
 			asynchronous, _ := handler["async"].(bool)
-			if (execForm || legacyShellForm) &&
-				asynchronous && numberMapValue(handler, "timeout") == claudeCodeHookTimeoutSeconds {
+			if asynchronous && numberMapValue(handler, "timeout") == claudeCodeHookTimeoutSeconds {
 				return true
 			}
 		}
@@ -230,30 +263,91 @@ func eventHasAiguardHook(value any) bool {
 	return false
 }
 
+func isAiguardHookHandler(handler map[string]any) bool {
+	handlerType, _ := handler["type"].(string)
+	if handlerType != "command" {
+		return false
+	}
+	arguments := stringArrayValue(handler["args"])
+	return len(arguments) > 0 && arguments[0] == claudecodehook.Subcommand && slices.Contains(arguments, "--records-url")
+}
+
+// removeClaudeCodeHooks strips only aiguard command handlers from the current
+// settings. Other handlers in the same group, groups added later, and every
+// unrelated setting remain untouched.
+func removeClaudeCodeHooks(config map[string]any) bool {
+	hooks, ok := objectValue(config["hooks"])
+	if !ok {
+		return false
+	}
+	changed := false
+
+	for _, eventName := range claudeCodeHookEvents {
+		rawGroups, exists := hooks[eventName]
+		if !exists {
+			continue
+		}
+		groups, ok := rawGroups.([]any)
+		if !ok {
+			continue
+		}
+		keptGroups := make([]any, 0, len(groups))
+		eventChanged := false
+		for _, rawGroup := range groups {
+			group, ok := objectValue(rawGroup)
+			if !ok {
+				keptGroups = append(keptGroups, rawGroup)
+				continue
+			}
+			handlers, ok := group["hooks"].([]any)
+			if !ok {
+				keptGroups = append(keptGroups, rawGroup)
+				continue
+			}
+			keptHandlers := make([]any, 0, len(handlers))
+			groupChanged := false
+			for _, rawHandler := range handlers {
+				handler, ok := objectValue(rawHandler)
+				if ok && isAiguardHookHandler(handler) {
+					eventChanged = true
+					groupChanged = true
+					continue
+				}
+				keptHandlers = append(keptHandlers, rawHandler)
+			}
+			if len(keptHandlers) == 0 && groupChanged {
+				continue
+			}
+			if groupChanged {
+				group["hooks"] = keptHandlers
+			}
+			keptGroups = append(keptGroups, group)
+		}
+		if !eventChanged {
+			continue
+		}
+		changed = true
+		if len(keptGroups) > 0 {
+			hooks[eventName] = keptGroups
+		} else {
+			delete(hooks, eventName)
+		}
+	}
+	if changed && len(hooks) == 0 {
+		delete(config, "hooks")
+	}
+	return changed
+}
+
 func objectValue(value any) (map[string]any, bool) {
 	object, ok := value.(map[string]any)
 	return object, ok
-}
-
-func arrayValue(value any) ([]any, bool) {
-	if value == nil {
-		return []any{}, true
-	}
-	array, ok := value.([]any)
-	return array, ok
-}
-
-func stringMapValue(object map[string]any, key string) string {
-	value, _ := object[key].(string)
-	return value
 }
 
 func numberMapValue(object map[string]any, key string) int {
 	switch value := object[key].(type) {
 	case int:
 		return value
-	case int64:
-		return int(value)
 	case float64:
 		return int(value)
 	default:
@@ -278,13 +372,4 @@ func stringArrayValue(value any) []string {
 	default:
 		return nil
 	}
-}
-
-func stringSliceContains(values []string, expected string) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
-		}
-	}
-	return false
 }

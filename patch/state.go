@@ -32,10 +32,10 @@ import (
 // needs more than "delete what we think we added": the config file may have had
 // content of its own, and a half-finished patch must not leave the agent broken.
 //
-// So every patcher makes its edits through a ChangeSet, which copies each file
-// aside before touching it and records what it did. The record (a manifest) is
-// saved next to the backups, and Revert replays it backwards. A patcher never
-// writes its own undo logic.
+// So every patcher that uses this journal makes its edits through a ChangeSet,
+// which copies each file aside before touching it and records what it did. The
+// record (a manifest) is saved next to the backups, and Revert replays it
+// backwards.
 
 // changeKind distinguishes the two things a patch creates on disk, because they
 // are undone differently: a file is restored or deleted, a directory is removed
@@ -60,8 +60,8 @@ type change struct {
 	Mode os.FileMode `json:"mode,omitempty"`
 }
 
-// manifest is the complete record of one patch, and the only thing Unpatch
-// needs in order to undo it.
+// manifest is the complete record of one patch, and the only thing Revert needs
+// in order to undo it.
 type manifest struct {
 	AgentId   string    `json:"agentId"`
 	Target    Target    `json:"target"`
