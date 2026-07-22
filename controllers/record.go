@@ -26,6 +26,8 @@ import (
 // @Title GetRecords
 // @Description list the behaviour records reported by patched agents, newest first
 // @Param agent query string false "only records from this agent id (default: all agents)"
+// @Param eventType query string false "only records in this normalized event category"
+// @Param outcome query string false "only attempted, success, failure or denied records"
 // @Param limit query int false "max number of records to return (default 200)"
 // @router /records [get]
 func (c *ApiController) GetRecords() {
@@ -35,7 +37,11 @@ func (c *ApiController) GetRecords() {
 			limit = parsed
 		}
 	}
-	c.ResponseOk(object.ListRecords(c.Ctx.Input.Query("agent"), limit))
+	c.ResponseOk(object.ListRecordsFiltered(object.RecordFilter{
+		Agent:     c.Ctx.Input.Query("agent"),
+		EventType: c.Ctx.Input.Query("eventType"),
+		Outcome:   c.Ctx.Input.Query("outcome"),
+	}, limit))
 }
 
 // AddRecord is the ingest endpoint the hooks aiguard installs into agents post

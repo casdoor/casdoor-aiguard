@@ -20,6 +20,7 @@ import (
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
 	"github.com/casdoor/casdoor-aiguard/auth"
+	"github.com/casdoor/casdoor-aiguard/claudecodehook"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/mcpserver"
 	"github.com/casdoor/casdoor-aiguard/object"
@@ -29,6 +30,9 @@ import (
 )
 
 func main() {
+	// Records and exits when Claude Code launched this binary as an async hook.
+	claudecodehook.ServeIfInvoked()
+
 	// Serves and exits when an agent launched this binary as its MCP server.
 	mcpserver.ServeIfInvoked()
 

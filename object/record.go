@@ -46,11 +46,38 @@ type Record struct {
 	// What happened. EventType and Action mirror the agent's own event
 	// vocabulary (for OpenClaw, "message"/"received"), so a record stays
 	// recognizable to someone reading the agent's documentation.
-	EventType  string `json:"eventType"`
-	Action     string `json:"action"`
+	EventType string `json:"eventType"`
+	Action    string `json:"action"`
+	// Outcome is a normalized result shared by hook and telemetry records:
+	// attempted, success, failure or denied. It stays empty for lifecycle
+	// events where a result would be misleading.
+	Outcome    string `json:"outcome,omitempty"`
 	SessionKey string `json:"sessionKey,omitempty"`
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
+
+	// Correlation and operation identity. Claude Code emits prompt_id and
+	// tool_use_id from hooks, and request_id plus a per-session sequence from
+	// OpenTelemetry. Keeping them as first-class fields makes the Records page
+	// useful without coupling it to either source's raw payload shape.
+	PromptId  string `json:"promptId,omitempty"`
+	ToolUseId string `json:"toolUseId,omitempty"`
+	RequestId string `json:"requestId,omitempty"`
+	Sequence  int64  `json:"sequence,omitempty"`
+	ToolName  string `json:"toolName,omitempty"`
+	McpServer string `json:"mcpServer,omitempty"`
+	McpTool   string `json:"mcpTool,omitempty"`
+
+	// LLM and operation usage metadata. Raw model request and response bodies
+	// are deliberately not stored; Claude Code's native telemetry supplies the
+	// audit-relevant accounting without duplicating the conversation.
+	Model               string  `json:"model,omitempty"`
+	DurationMs          int64   `json:"durationMs,omitempty"`
+	InputTokens         int64   `json:"inputTokens,omitempty"`
+	OutputTokens        int64   `json:"outputTokens,omitempty"`
+	CacheReadTokens     int64   `json:"cacheReadTokens,omitempty"`
+	CacheCreationTokens int64   `json:"cacheCreationTokens,omitempty"`
+	CostUsd             float64 `json:"costUsd,omitempty"`
 
 	// Object is the event payload as JSON, and Detail a human-readable note.
 	Object string `json:"object,omitempty"`

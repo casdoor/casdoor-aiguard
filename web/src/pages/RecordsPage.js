@@ -44,6 +44,19 @@ function prettyObject(object) {
   }
 }
 
+function formatUsage(record) {
+  const parts = [];
+  if (record.inputTokens) parts.push(`in ${record.inputTokens.toLocaleString()}`);
+  if (record.outputTokens) parts.push(`out ${record.outputTokens.toLocaleString()}`);
+  if (record.cacheReadTokens) parts.push(`cache read ${record.cacheReadTokens.toLocaleString()}`);
+  if (record.cacheCreationTokens) parts.push(`cache write ${record.cacheCreationTokens.toLocaleString()}`);
+  return parts.join(" · ");
+}
+
+function outcomeColor(outcome) {
+  return {attempted: "processing", success: "success", failure: "error", denied: "warning"}[outcome] || "default";
+}
+
 // A record is aiguard's account of what happened, and the verdict on it is a
 // guess made by rules somebody wrote in advance. FeedbackCell is where a person
 // who knows better corrects that guess - and the correction does not stay a
@@ -113,7 +126,23 @@ function RecordDetail({record}) {
         </Descriptions.Item>
       )}
       {record.agentPath && <Descriptions.Item label="Agent path"><Text code>{record.agentPath}</Text></Descriptions.Item>}
+      {record.user && <Descriptions.Item label="User">{record.user}</Descriptions.Item>}
+      {record.channel && <Descriptions.Item label="Channel">{record.channel}</Descriptions.Item>}
       {record.sessionKey && <Descriptions.Item label="Session">{record.sessionKey}</Descriptions.Item>}
+      {record.promptId && <Descriptions.Item label="Prompt ID"><Text code>{record.promptId}</Text></Descriptions.Item>}
+      {record.toolUseId && <Descriptions.Item label="Tool use ID"><Text code>{record.toolUseId}</Text></Descriptions.Item>}
+      {record.requestId && <Descriptions.Item label="Request ID"><Text code>{record.requestId}</Text></Descriptions.Item>}
+      {record.sequence ? <Descriptions.Item label="Sequence">{record.sequence}</Descriptions.Item> : null}
+      {record.toolName && <Descriptions.Item label="Tool"><Text code>{record.toolName}</Text></Descriptions.Item>}
+      {record.mcpServer && (
+        <Descriptions.Item label="MCP target">
+          <Text code>{record.mcpServer}{record.mcpTool ? ` / ${record.mcpTool}` : ""}</Text>
+        </Descriptions.Item>
+      )}
+      {record.model && <Descriptions.Item label="Model"><Text code>{record.model}</Text></Descriptions.Item>}
+      {formatUsage(record) && <Descriptions.Item label="Tokens">{formatUsage(record)}</Descriptions.Item>}
+      {record.costUsd ? <Descriptions.Item label="Estimated cost">${record.costUsd.toFixed(6)}</Descriptions.Item> : null}
+      {record.durationMs ? <Descriptions.Item label="Duration">{record.durationMs.toLocaleString()} ms</Descriptions.Item> : null}
       {record.clientIp && <Descriptions.Item label="Reported from">{record.clientIp}</Descriptions.Item>}
       {record.detail && <Descriptions.Item label="Detail">{record.detail}</Descriptions.Item>}
       {record.policySet && (
@@ -136,7 +165,10 @@ export default function RecordsPage() {
   const location = useLocation();
   // The agent filter lives in the URL, so a link from the agents table ("View
   // records for this agent") lands pre-filtered and the view stays shareable.
-  const agent = new URLSearchParams(location.search).get("agent") || "";
+  const search = new URLSearchParams(location.search);
+  const agent = search.get("agent") || "";
+  const eventType = search.get("eventType") || "";
+  const outcome = search.get("outcome") || "";
 
   const [records, setRecords] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -149,13 +181,13 @@ export default function RecordsPage() {
   }, []);
 
   const load = useCallback(() => {
-    getRecords(agent, 200)
+    getRecords(agent, 200, eventType, outcome)
       .then((data) => {
         setRecords(data || []);
         setError(null);
       })
       .catch((err) => setError(err.message));
-  }, [agent]);
+  }, [agent, eventType, outcome]);
 
   useEffect(() => {
     load();
@@ -172,8 +204,15 @@ export default function RecordsPage() {
 
   const corrected = records.filter((record) => record.feedback).length;
 
-  const setAgent = (value) => {
-    history.push(value ? `/records?agent=${encodeURIComponent(value)}` : "/records");
+  const setFilter = (key, value) => {
+    const params = new URLSearchParams(location.search);
+    if (value) {
+      params.set(key, value);
+    } else {
+      params.delete(key);
+    }
+    const query = params.toString();
+    history.push(query ? `/records?${query}` : "/records");
   };
 
   const columns = [
@@ -189,9 +228,58 @@ export default function RecordsPage() {
         </Tag>
       ),
     },
-    {title: "Event", key: "event", render: (_, record) => <Text code>{`${record.eventType}:${record.action}`}</Text>},
-    {title: "Channel", dataIndex: "channel", key: "channel"},
-    {title: "User", dataIndex: "user", key: "user"},
+    {
+      title: "Event",
+      key: "event",
+      render: (_, record) => (
+        <Space size={4} wrap>
+          <Tag>{record.eventType}</Tag>
+          <Text code>{record.action}</Text>
+          {record.outcome && <Tag color={outcomeColor(record.outcome)}>{record.outcome}</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: "Target / model",
+      key: "target",
+      render: (_, record) => {
+        const target = record.mcpServer
+          ? `${record.mcpServer}${record.mcpTool ? ` / ${record.mcpTool}` : ""}`
+          : record.toolName;
+        return (
+          <Space direction="vertical" size={0}>
+            {target && <Text code>{target}</Text>}
+            {record.model && <Text type="secondary">{record.model}</Text>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: "Usage",
+      key: "usage",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {formatUsage(record) && <Text>{formatUsage(record)}</Text>}
+          {(record.costUsd || record.durationMs) && (
+            <Text type="secondary">
+              {record.costUsd ? `$${record.costUsd.toFixed(6)}` : ""}
+              {record.costUsd && record.durationMs ? " · " : ""}
+              {record.durationMs ? `${record.durationMs.toLocaleString()} ms` : ""}
+            </Text>
+          )}
+        </Space>
+      ),
+    },
+    {
+      title: "Actor",
+      key: "actor",
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {record.user && <Text>{record.user}</Text>}
+          {record.channel && <Text type="secondary">{record.channel}</Text>}
+        </Space>
+      ),
+    },
     {title: "Session", dataIndex: "sessionKey", key: "sessionKey", ellipsis: true},
     {
       title: "Triggered",
@@ -209,10 +297,14 @@ export default function RecordsPage() {
       render: (value) => (value ? <Link to={`/policyhub/${encodeURIComponent(value)}`}>{value}</Link> : null),
     },
     {
-      title: "Allowed",
-      dataIndex: "isAllowed",
-      key: "isAllowed",
-      render: (value) => (value ? <Tag color="green">allowed</Tag> : <Tag color="red">blocked</Tag>),
+      title: "Verdict",
+      key: "verdict",
+      render: (_, record) => {
+        if (!record.resource || !record.intent) {
+          return <Text type="secondary">logged</Text>;
+        }
+        return record.isAllowed ? <Tag color="green">allowed</Tag> : <Tag color="red">blocked</Tag>;
+      },
     },
     {
       title: "Reason",
@@ -246,12 +338,33 @@ export default function RecordsPage() {
             </Link>
           }
         </Space>
-        <Select
-          value={agent}
-          options={agentOptions}
-          onChange={setAgent}
-          style={{width: 220}}
-        />
+        <Space wrap>
+          <Select
+            value={eventType}
+            onChange={(value) => setFilter("eventType", value)}
+            style={{width: 160}}
+            options={[
+              {value: "", label: "All categories"},
+              ...["session", "prompt", "tool", "mcp", "permission", "subagent", "compact", "llm", "runtime"]
+                .map((value) => ({value, label: value})),
+            ]}
+          />
+          <Select
+            value={outcome}
+            onChange={(value) => setFilter("outcome", value)}
+            style={{width: 150}}
+            options={[
+              {value: "", label: "All outcomes"},
+              ...["attempted", "success", "failure", "denied"].map((value) => ({value, label: value})),
+            ]}
+          />
+          <Select
+            value={agent}
+            options={agentOptions}
+            onChange={(value) => setFilter("agent", value)}
+            style={{width: 220}}
+          />
+        </Space>
       </Space>
       {error && <Alert type="error" message={error} style={{marginBottom: 16}} />}
       <Table
