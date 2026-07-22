@@ -31,7 +31,6 @@ func InitAPI() {
 	web.Router("/api/events", &controllers.ApiController{}, "GET:GetEvents")
 	web.Router("/api/records", &controllers.ApiController{}, "GET:GetRecords")
 	web.Router("/api/records", &controllers.ApiController{}, "POST:AddRecord")
-	web.Router("/api/otel/v1/logs", &controllers.ApiController{}, "POST:IngestOtelLogs")
 	web.Router("/api/records/feedback", &controllers.ApiController{}, "POST:UpdateRecordFeedback")
 	web.Router("/api/enforce", &controllers.ApiController{}, "POST:Enforce")
 	web.Router("/api/policy", &controllers.ApiController{}, "GET:GetPolicy")

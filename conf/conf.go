@@ -145,17 +145,6 @@ func GetRecordsIngestUrl() string {
 	return url
 }
 
-// GetOtelLogsIngestUrl is the OTLP/HTTP JSON endpoint written into Claude
-// Code's telemetry environment. It is separate from recordsIngestUrl because
-// OTLP sends a batched protocol envelope rather than one normalized Record.
-func GetOtelLogsIngestUrl() string {
-	url := GetConfigString("otelLogsIngestUrl")
-	if url == "" {
-		url = fmt.Sprintf("http://127.0.0.1:%d/api/otel/v1/logs", GetConfigInt("httpport", 9000))
-	}
-	return url
-}
-
 // GetEnforceUrl is the endpoint a patched agent's intercept path calls to ask
 // aiguard for a verdict before performing an operation. It sits beside the
 // records ingest URL and defaults the same way: this process's own management

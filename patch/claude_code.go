@@ -75,7 +75,6 @@ func (p claudeCodePatcher) Patch(target Target) error {
 		if err := installClaudeCodeHooks(config, hookCommand, hookArguments); err != nil {
 			return fmt.Errorf("cannot merge Claude Code hooks: %w", err)
 		}
-		configureClaudeCodeTelemetry(config, conf.GetOtelLogsIngestUrl())
 
 		updated, err := json.MarshalIndent(config, "", "  ")
 		if err != nil {
@@ -114,10 +113,7 @@ func (p claudeCodePatcher) Status(target Target) (Status, error) {
 		return Status{Detail: fmt.Sprintf("Claude Code hooks are incomplete (%d/%d active)", hookState, len(claudeCodeHookEvents))}, nil
 	}
 
-	detail := "Hooks active, LLM telemetry unavailable"
-	if claudeCodeTelemetryActive(config, conf.GetOtelLogsIngestUrl()) {
-		detail = "Hooks and LLM telemetry active; start a new Claude Code session after patching"
-	}
+	detail := "Hooks active"
 	if !IsApplied(target) {
 		detail += "; patched outside aiguard, so unpatch cannot restore the original settings"
 	}
@@ -232,102 +228,6 @@ func eventHasAiguardHook(value any) bool {
 		}
 	}
 	return false
-}
-
-// configureClaudeCodeTelemetry augments only a configuration that does not
-// already select an external logs collector. It returns false when telemetry
-// must remain untouched, while hooks continue to provide behavioural auditing.
-func configureClaudeCodeTelemetry(config map[string]any, endpoint string) bool {
-	environment, ok := objectValue(config["env"])
-	if config["env"] != nil && !ok {
-		return false
-	}
-	if !ok {
-		environment = map[string]any{}
-		config["env"] = environment
-	}
-
-	if stringMapValue(environment, "CLAUDE_CODE_ENABLE_TELEMETRY") == "0" {
-		return false
-	}
-	exporters := splitExporters(stringMapValue(environment, "OTEL_LOGS_EXPORTER"))
-	if exporters["none"] {
-		return false
-	}
-	logsEndpoint := stringMapValue(environment, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-	globalEndpoint := stringMapValue(environment, "OTEL_EXPORTER_OTLP_ENDPOINT")
-	protocol := stringMapValue(environment, "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
-
-	consoleOnly := len(exporters) == 1 && exporters["console"]
-	if exporters["otlp"] && logsEndpoint == "" && globalEndpoint == "" {
-		return false
-	}
-	usesOtlp := exporters["otlp"] || (!consoleOnly && (logsEndpoint != "" || globalEndpoint != ""))
-	if usesOtlp && !telemetryEndpointMatches(logsEndpoint, globalEndpoint, endpoint) && (logsEndpoint != "" || globalEndpoint != "") {
-		return false
-	}
-	if usesOtlp && protocol != "" && protocol != "http/json" {
-		return false
-	}
-	for exporter := range exporters {
-		if exporter != "console" && exporter != "otlp" {
-			return false
-		}
-	}
-
-	environment["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
-	if exporters["console"] {
-		environment["OTEL_LOGS_EXPORTER"] = "console,otlp"
-	} else {
-		environment["OTEL_LOGS_EXPORTER"] = "otlp"
-	}
-	environment["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] = "http/json"
-	environment["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = endpoint
-	environment["OTEL_LOG_TOOL_DETAILS"] = "1"
-	environment["OTEL_LOG_ASSISTANT_RESPONSES"] = "0"
-	return true
-}
-
-func claudeCodeTelemetryActive(config map[string]any, endpoint string) bool {
-	environment, ok := objectValue(config["env"])
-	if !ok || stringMapValue(environment, "CLAUDE_CODE_ENABLE_TELEMETRY") == "0" {
-		return false
-	}
-	exporters := splitExporters(stringMapValue(environment, "OTEL_LOGS_EXPORTER"))
-	if !exporters["otlp"] {
-		return false
-	}
-	protocol := stringMapValue(environment, "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
-	if protocol == "" {
-		protocol = stringMapValue(environment, "OTEL_EXPORTER_OTLP_PROTOCOL")
-	}
-	if protocol != "http/json" {
-		return false
-	}
-	return telemetryEndpointMatches(
-		stringMapValue(environment, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"),
-		stringMapValue(environment, "OTEL_EXPORTER_OTLP_ENDPOINT"),
-		endpoint,
-	)
-}
-
-func telemetryEndpointMatches(logsEndpoint string, globalEndpoint string, desired string) bool {
-	desired = strings.TrimRight(desired, "/")
-	if strings.TrimRight(logsEndpoint, "/") == desired && logsEndpoint != "" {
-		return true
-	}
-	derived := strings.TrimRight(globalEndpoint, "/") + "/v1/logs"
-	return globalEndpoint != "" && derived == desired
-}
-
-func splitExporters(value string) map[string]bool {
-	result := map[string]bool{}
-	for _, exporter := range strings.Split(value, ",") {
-		if exporter = strings.ToLower(strings.TrimSpace(exporter)); exporter != "" {
-			result[exporter] = true
-		}
-	}
-	return result
 }
 
 func objectValue(value any) (map[string]any, bool) {

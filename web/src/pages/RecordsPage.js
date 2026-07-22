@@ -44,15 +44,6 @@ function prettyObject(object) {
   }
 }
 
-function formatUsage(record) {
-  const parts = [];
-  if (record.inputTokens) parts.push(`in ${record.inputTokens.toLocaleString()}`);
-  if (record.outputTokens) parts.push(`out ${record.outputTokens.toLocaleString()}`);
-  if (record.cacheReadTokens) parts.push(`cache read ${record.cacheReadTokens.toLocaleString()}`);
-  if (record.cacheCreationTokens) parts.push(`cache write ${record.cacheCreationTokens.toLocaleString()}`);
-  return parts.join(" · ");
-}
-
 function outcomeColor(outcome) {
   return {attempted: "processing", success: "success", failure: "error", denied: "warning"}[outcome] || "default";
 }
@@ -131,8 +122,6 @@ function RecordDetail({record}) {
       {record.sessionKey && <Descriptions.Item label="Session">{record.sessionKey}</Descriptions.Item>}
       {record.promptId && <Descriptions.Item label="Prompt ID"><Text code>{record.promptId}</Text></Descriptions.Item>}
       {record.toolUseId && <Descriptions.Item label="Tool use ID"><Text code>{record.toolUseId}</Text></Descriptions.Item>}
-      {record.requestId && <Descriptions.Item label="Request ID"><Text code>{record.requestId}</Text></Descriptions.Item>}
-      {record.sequence ? <Descriptions.Item label="Sequence">{record.sequence}</Descriptions.Item> : null}
       {record.toolName && <Descriptions.Item label="Tool"><Text code>{record.toolName}</Text></Descriptions.Item>}
       {record.mcpServer && (
         <Descriptions.Item label="MCP target">
@@ -140,8 +129,6 @@ function RecordDetail({record}) {
         </Descriptions.Item>
       )}
       {record.model && <Descriptions.Item label="Model"><Text code>{record.model}</Text></Descriptions.Item>}
-      {formatUsage(record) && <Descriptions.Item label="Tokens">{formatUsage(record)}</Descriptions.Item>}
-      {record.costUsd ? <Descriptions.Item label="Estimated cost">${record.costUsd.toFixed(6)}</Descriptions.Item> : null}
       {record.durationMs ? <Descriptions.Item label="Duration">{record.durationMs.toLocaleString()} ms</Descriptions.Item> : null}
       {record.clientIp && <Descriptions.Item label="Reported from">{record.clientIp}</Descriptions.Item>}
       {record.detail && <Descriptions.Item label="Detail">{record.detail}</Descriptions.Item>}
@@ -255,22 +242,6 @@ export default function RecordsPage() {
       },
     },
     {
-      title: "Usage",
-      key: "usage",
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          {formatUsage(record) && <Text>{formatUsage(record)}</Text>}
-          {(record.costUsd || record.durationMs) && (
-            <Text type="secondary">
-              {record.costUsd ? `$${record.costUsd.toFixed(6)}` : ""}
-              {record.costUsd && record.durationMs ? " · " : ""}
-              {record.durationMs ? `${record.durationMs.toLocaleString()} ms` : ""}
-            </Text>
-          )}
-        </Space>
-      ),
-    },
-    {
       title: "Actor",
       key: "actor",
       render: (_, record) => (
@@ -345,7 +316,7 @@ export default function RecordsPage() {
             style={{width: 160}}
             options={[
               {value: "", label: "All categories"},
-              ...["session", "prompt", "tool", "mcp", "permission", "subagent", "compact", "llm", "runtime"]
+              ...["session", "prompt", "tool", "mcp", "permission", "subagent", "compact"]
                 .map((value) => ({value, label: value})),
             ]}
           />
