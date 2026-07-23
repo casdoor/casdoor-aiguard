@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package mcpserver is aiguard's Model Context Protocol server, the form
-// aiguard takes when it instruments an agent that has no hook system.
+// Package mcpserver is aiguard's Model Context Protocol server, used for agents
+// whose local configuration can launch a stdio MCP server.
 //
 // Claude Desktop is the case in point: it is a packaged application with no
 // hook directory and no CLI, and the only extension point its user can
-// configure is the list of MCP servers in claude_desktop_config.json. So the
+// configure for ordinary Chat is the list of MCP servers in
+// claude_desktop_config.json. So the
 // patch registers the aiguard binary itself there, and Claude Desktop launches
 // this server over stdio. Everything it then sees - the session handshake, the
-// tools the model asks for, the calls it makes - is posted to the running
-// aiguard as records.
+// tools addressed to aiguard - is posted to the running process as records.
+// Cowork's broader behaviour stream arrives through package agenttelemetry.
 //
 // Why a separate process at all, rather than serving MCP from the aiguard that
 // is already running? Because claude_desktop_config.json accepts stdio servers

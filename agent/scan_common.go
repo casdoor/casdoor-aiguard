@@ -84,19 +84,23 @@ func stampAgentId(installations []Installation, mark int, agentId string) {
 }
 
 // dedupeInstallations drops installations that resolve to the same executable
-// and returns the rest ordered by owner then path. The result is never nil, so
-// the API reports an empty list rather than null.
+// for the same owner and returns the rest ordered by owner then path. A shared
+// desktop executable remains one patch target per user. The result is never
+// nil, so the API reports an empty list rather than null.
 func dedupeInstallations(installations []Installation) []Installation {
 	seen := map[string]bool{}
 	result := make([]Installation, 0, len(installations))
 	for _, installation := range installations {
-		key := canonicalPath(installation.Path)
-		if key == "" {
+		path := canonicalPath(installation.Path)
+		if path == "" {
 			continue
 		}
+		owner := installation.Owner
 		if runtime.GOOS == "windows" {
-			key = strings.ToLower(key)
+			path = strings.ToLower(path)
+			owner = strings.ToLower(owner)
 		}
+		key := owner + "\x00" + path
 		if seen[key] {
 			continue
 		}

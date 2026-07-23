@@ -22,10 +22,9 @@ package patch
 // To implement an agent, replace its embedded unimplemented with real Patch,
 // Unpatch and Status methods. There are two worked examples to follow from,
 // depending on what the agent offers: openclaw.go installs a hook into an agent
-// that has an event system, and claude_desktop.go registers aiguard as an MCP
-// server for an agent that has none. Either way, Patch must route every
-// filesystem edit through the ChangeSet it is handed, which is what makes
-// Unpatch a matter of calling Revert.
+// that has an event system, and mcp_config.go registers aiguard as an MCP
+// server from profile data. Dedicated files go through ChangeSet; shared
+// settings remove only the entries aiguard owns.
 type unimplemented struct {
 	id string
 }

@@ -30,6 +30,7 @@ func Scan() []Installation {
 	var installations []Installation
 	for _, fingerprint := range compiledFingerprints {
 		mark := len(installations)
+		installations = append(installations, scanDarwinExecutables(fingerprint, homes)...)
 		for _, home := range homes {
 			installations = append(installations, scanNative(fingerprint, home)...)
 			installations = append(installations, scanNpmPatterns(fingerprint, userNpmPatterns(fingerprint, home.path), home.owner, fileOwner)...)
@@ -41,6 +42,36 @@ func Scan() []Installation {
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
 	return dedupeInstallations(installations)
+}
+
+func scanDarwinExecutables(fingerprint *compiledFingerprint, homes []homeDir) []Installation {
+	var result []Installation
+	for _, location := range fingerprint.DarwinExecutables {
+		if filepath.IsAbs(location.Path) {
+			info, err := os.Stat(location.Path)
+			if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+				continue
+			}
+			for _, home := range homes {
+				result = append(result, Installation{
+					Name: fingerprint.DisplayName, Path: location.Path,
+					InstallMethod: location.InstallMethod, Owner: home.owner,
+				})
+			}
+			continue
+		}
+		for _, home := range homes {
+			executable := filepath.Join(home.path, filepath.FromSlash(location.Path))
+			info, err := os.Stat(executable)
+			if err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+				result = append(result, Installation{
+					Name: fingerprint.DisplayName, Path: executable,
+					InstallMethod: location.InstallMethod, Owner: home.owner,
+				})
+			}
+		}
+	}
+	return result
 }
 
 func darwinHomes() []homeDir {

@@ -15,7 +15,7 @@
 package agent
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -74,6 +74,14 @@ type Fingerprint struct {
 	// ExtraExecRules covers executable layouts that the fields above do not
 	// imply. Most agents need none.
 	ExtraExecRules []PathRule
+	// DarwinExecutables covers packaged macOS applications whose launcher is
+	// at a stable system path or a stable path relative to each user's home.
+	DarwinExecutables []ExecutableLocation
+}
+
+type ExecutableLocation struct {
+	Path          string
+	InstallMethod string
 }
 
 // fingerprints is the registry of agents aiguard knows how to recognize.
@@ -94,6 +102,10 @@ var fingerprints = []Fingerprint{
 		ExecName:            "claude",
 		MSIXFamily:          "Claude_pzs8sxrjxfjjc",
 		DesktopInstallerDir: "AnthropicClaude",
+		DarwinExecutables: []ExecutableLocation{
+			{Path: "/Applications/Claude.app/Contents/MacOS/Claude", InstallMethod: "desktop"},
+			{Path: "Applications/Claude.app/Contents/MacOS/Claude", InstallMethod: "desktop"},
+		},
 	},
 	{
 		ID:          "openclaw",
@@ -288,6 +300,14 @@ func deriveExecRules(f Fingerprint) []PathRule {
 			"__" + publisher + "/app/" + windowsExec,
 		}})
 	}
+	for _, location := range f.DarwinExecutables {
+		locationPath := strings.ToLower(path.Clean(strings.ReplaceAll(location.Path, `\`, "/")))
+		if strings.HasPrefix(locationPath, "/") {
+			rules = append(rules, PathRule{Exact: locationPath})
+		} else {
+			rules = append(rules, PathRule{Suffix: "/" + locationPath})
+		}
+	}
 	return append(rules, f.ExtraExecRules...)
 }
 
@@ -305,11 +325,11 @@ func splitMSIXFamily(family string) (name string, publisher string, ok bool) {
 // IdentifyExecutable returns the agent ID for a known executable layout, or ""
 // when the path belongs to no known agent. On Linux, the caller should pass the
 // resolved /proc/<pid>/exe path.
-func IdentifyExecutable(path string) string {
-	if path == "" {
+func IdentifyExecutable(filePath string) string {
+	if filePath == "" {
 		return ""
 	}
-	normalized := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	normalized := strings.ToLower(path.Clean(strings.ReplaceAll(filePath, `\`, "/")))
 	for _, fingerprint := range compiledFingerprints {
 		for _, rule := range fingerprint.execRules {
 			if rule.matches(normalized) {

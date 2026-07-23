@@ -72,7 +72,7 @@ agent, and one record on the Records page.
   │               Claude Code, OpenClaw, Codex CLI, Cursor, Windsurf, …)   │
   │  patch/       instrument one through its own extension point:          │
   │                 • OpenClaw       → a hook in its hook directory        │
-  │                 • Claude Desktop → aiguard registered as an MCP server │
+  │                 • Claude Desktop → MCP + native Cowork OTLP telemetry  │
   │               shared settings are edited without replacing user data   │
   │  the patched agent then posts each operation to aiguard before doing   │
   │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
@@ -131,22 +131,45 @@ heard of.
 ![Agents](docs/images/agents.png)
 
 **Patch** instruments an installation; **Unpatch** removes that instrumentation.
-File-based patchers keep backups in `data/patches/`. Claude Code edits its shared
-settings file in place and Unpatch removes only aiguard's current hook handlers,
-so other settings and hooks remain untouched.
+File-based patchers keep backups in `data/patches/`. Shared JSON settings are
+edited incrementally, and Unpatch removes only aiguard-owned entries so other
+settings and later user edits remain untouched.
 
-How an agent is instrumented is agent-specific, so each agent supplies its own
-patcher (`patch/`):
+Instrumentation is selected from the agent's supported extension shape:
 
 | Agent | Extension point used | Status |
 |-------|---------------------|--------|
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
-| **Claude Desktop** | aiguard registers *itself* as an MCP server in `claude_desktop_config.json` and serves MCP over stdio (`mcpserver/`) | supported |
+| **Claude Desktop** | native Cowork OTLP telemetry + aiguard as a local MCP server for Chat | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
 | Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
-Adding an agent means writing one `patch.Patcher` and registering it; nothing
-else in aiguard changes.
+Compatible agents are data-driven: installation fingerprints, command-hook
+vocabularies, OTLP services and JSON MCP registrations each live in a profile
+table. A new agent using an existing extension shape adds a profile rather than
+another patcher or event parser.
+
+### Claude Desktop and Cowork
+
+Claude Desktop has two different observation surfaces:
+
+- Patching adds `casdoor-aiguard` to `mcpServers`. This works for ordinary
+  Desktop Chat but sees only the MCP session and calls addressed to that server;
+  MCP cannot observe other connectors or the conversation.
+- Cowork exposes its full behaviour stream through
+  [OpenTelemetry](https://claude.com/docs/cowork/monitoring): prompts,
+  model responses and API calls, tool/MCP results, file operations and approval
+  decisions. Aiguard accepts the `http/json` logs stream at
+  `/api/otel/v1/logs` and correlates records by `prompt.id`.
+
+Cowork telemetry (Claude Desktop 1.1.4173 or later) is configured by a Team or
+Enterprise administrator in
+**Admin settings → Cowork**. Set the OTLP endpoint to
+`http://<aiguard-host>:9000/api/otel` and protocol to `http/json`; Cowork adds
+`/v1/logs`. The host must be reachable from the Cowork VM. Metadata is exported
+by default; enable the desired `otlpContentCapture` options in Claude when
+prompt text, response text or tool inputs are required. Start a new Cowork
+session after changing the setting.
 
 ### Claude Code hooks
 
@@ -377,6 +400,7 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/agents` | AI agents installed on this host, with patch status |
 | `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
 | `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`; ingest one hook record) |
+| `POST /api/otel/v1/logs` | OTLP/HTTP JSON behaviour stream from profile-registered agents |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
 | `POST /api/enforce` | rule on one agent operation and record it |
 | `GET /api/events` | most recent intercepted egress events, newest first |
@@ -395,9 +419,10 @@ All responses use Casdoor's `{ "status": "ok", "msg": "", "data": ... }` envelop
 main.go                 bootstrap: settings, policy, audit, CA, proxy, web
 conf/                   app.conf, policy.yaml, config helpers
 agent/                  per-OS scanners + fingerprints of known AI agents
-patch/                  per-agent instrumentation and file backup journal
+patch/                  profile-driven instrumentation + file backup journal
 mcpserver/              aiguard as an MCP server (how Claude Desktop is patched)
 agenthook/              shared command-hook normalizer and reporter
+agenttelemetry/         shared OTLP decoder + service/event profiles
 auditutil/              shared payload redaction and size boundary
 object/                 domain models: policy sets, Casbin enforcement, records,
                         events, settings, audit, self-learning

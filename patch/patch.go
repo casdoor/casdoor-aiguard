@@ -16,15 +16,14 @@
 // patched agent streams its behaviour log to aiguard in real time (see
 // object.Record).
 //
-// How an agent is instrumented is entirely agent-specific - OpenClaw takes a
-// hook directory plus a config entry, Claude Code takes hook commands in its
-// settings file - so each agent supplies its own Patcher. What every agent
-// shares is the contract in this file. File-based patchers can use the backup
-// journal in state.go; patchers that edit shared settings can remove only the
+// Instrumentation is selected by extension shape: hook directories, command
+// hooks or JSON MCP registrations. Compatible agents share an implementation
+// and differ only by profile data. File-based patchers can use the backup
+// journal in state.go; patchers that edit shared settings remove only the
 // entries they own.
 //
-// Adding an agent means writing one Patcher and registering it; nothing else in
-// aiguard needs to change.
+// An agent with a new extension shape implements Patcher once; subsequent
+// compatible agents add profiles.
 package patch
 
 import (

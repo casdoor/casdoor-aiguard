@@ -16,9 +16,11 @@ package controllers
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/casdoor/casdoor-aiguard/agenttelemetry"
 	"github.com/casdoor/casdoor-aiguard/object"
 )
 
@@ -68,4 +70,23 @@ func (c *ApiController) AddRecord() {
 
 	object.AddRecord(&record)
 	c.ResponseOk()
+}
+
+// IngestAgentTelemetry accepts OTLP/HTTP JSON logs from profile-registered
+// agents. The response is the OTLP empty success object, not the management
+// API envelope.
+func (c *ApiController) IngestAgentTelemetry() {
+	c.Ctx.Output.Header("Content-Type", "application/json")
+	records, err := agenttelemetry.Parse(c.Ctx.Input.RequestBody)
+	if err != nil {
+		c.Ctx.Output.SetStatus(http.StatusBadRequest)
+		_ = c.Ctx.Output.Body([]byte(`{"error":"invalid OTLP logs JSON"}`))
+		return
+	}
+	clientIp := strings.TrimSpace(c.Ctx.Input.IP())
+	for _, record := range records {
+		record.ClientIp = clientIp
+		object.AddRecord(record)
+	}
+	_ = c.Ctx.Output.Body([]byte("{}"))
 }

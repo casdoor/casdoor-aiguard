@@ -17,9 +17,12 @@ package patch
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -49,6 +52,29 @@ func homeOf(target Target) (string, error) {
 		}
 	}
 	return os.UserHomeDir()
+}
+
+// userConfigDir resolves the platform's standard per-user application config
+// directory. Environment overrides belong only to the account aiguard runs as;
+// another target owner always resolves from that owner's home.
+func userConfigDir(target Target) (string, error) {
+	home, err := homeOf(target)
+	if err != nil {
+		return "", err
+	}
+	switch runtime.GOOS {
+	case "windows":
+		if isCurrentUser(target.Owner) {
+			if appData := os.Getenv("APPDATA"); appData != "" {
+				return appData, nil
+			}
+		}
+		return filepath.Join(home, "AppData", "Roaming"), nil
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support"), nil
+	default:
+		return "", fmt.Errorf("user application config is not supported on %s", runtime.GOOS)
+	}
 }
 
 // isCurrentUser reports whether owner is the account aiguard itself runs as.

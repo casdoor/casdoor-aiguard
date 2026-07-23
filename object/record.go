@@ -24,8 +24,9 @@ import (
 // already trim what they send; this is the server-side backstop.
 const maxRecordObjectBytes = 64 * 1024
 
-// Record is one behaviour-log entry reported by a patched agent, modelled on
-// Casdoor's object.Record so the two audit trails read the same way.
+// Record is one behaviour-log entry reported by an agent hook or telemetry
+// stream, modelled on Casdoor's object.Record so the two audit trails read the
+// same way.
 //
 // It is the counterpart to Event, and the distinction matters: an Event is
 // traffic aiguard intercepted from the outside and ruled on, while a Record is

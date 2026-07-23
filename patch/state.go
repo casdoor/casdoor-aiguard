@@ -74,10 +74,9 @@ type manifest struct {
 // their edits to the same agent's files.
 var stateMutex sync.Mutex
 
-// ChangeSet is the only way a patcher is allowed to touch the filesystem. Each
-// method backs up what it is about to overwrite and appends to the manifest, so
-// the patcher can concentrate on what the agent needs rather than on how to put
-// it back.
+// ChangeSet is for files a patcher owns as a unit. Each method backs up what it
+// is about to overwrite and appends to the manifest. Shared settings instead
+// use the incremental JSON helpers and remove only aiguard-owned entries.
 type ChangeSet struct {
 	manifest  *manifest
 	backupDir string
