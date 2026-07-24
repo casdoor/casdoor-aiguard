@@ -20,6 +20,7 @@ import (
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web"
 	"github.com/casdoor/casdoor-aiguard/agenthook"
+	"github.com/casdoor/casdoor-aiguard/agentmonitor"
 	"github.com/casdoor/casdoor-aiguard/auth"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/mcpserver"
@@ -53,6 +54,10 @@ func main() {
 	if err := object.InitRecordLog(); err != nil {
 		panic(err)
 	}
+	if err := agentmonitor.Start(); err != nil {
+		logs.Error("agent monitor could not start: %v", err)
+	}
+	defer agentmonitor.Stop()
 
 	ca, err := proxy.LoadOrCreateCA()
 	if err != nil {

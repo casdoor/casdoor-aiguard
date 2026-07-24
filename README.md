@@ -73,6 +73,8 @@ agent, and one record on the Records page.
   │  patch/       instrument one through its own extension point:          │
   │                 • OpenClaw       → a hook in its hook directory        │
   │                 • Claude Desktop → aiguard registered as an MCP server │
+  │                 • Claude Code    → command hooks in shared settings    │
+  │               Windows Desktop also tails Cowork audit.jsonl files      │
   │               shared settings are edited without replacing user data   │
   │  the patched agent then posts each operation to aiguard before doing   │
   │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
@@ -141,7 +143,7 @@ patcher (`patch/`):
 | Agent | Extension point used | Status |
 |-------|---------------------|--------|
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
-| **Claude Desktop** | aiguard registers *itself* as an MCP server in `claude_desktop_config.json` and serves MCP over stdio (`mcpserver/`) | supported |
+| **Claude Desktop** | MCP server registration; on Windows, Cowork `audit.jsonl` plus the shared Claude Code hooks | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
 | Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
@@ -150,11 +152,12 @@ else in aiguard changes.
 
 ### Claude Code hooks
 
-The Claude Code patch incrementally edits the user-level
-`~/.claude/settings.json`. It preserves unrelated settings and hooks, refreshes
-its existing handlers when the aiguard executable, records URL or handler
-options change, and removes only its own handlers during Unpatch. An empty
-settings file is treated as `{}`.
+Claude Code CLI and Desktop's Code tab share the user-level
+`~/.claude/settings.json`. Patching either one incrementally installs the same
+handlers there. The handler records activity as `claude-code`; that shared
+configuration cannot reliably tell whether Desktop Code or the CLI launched
+the session. Source claims ensure that unpatching one integration does not
+remove hooks still used by the other.
 
 Each asynchronous handler launches `aiguard agent-hook --agent claude-code` and
 reports session, prompt, tool/MCP, permission, subagent, compaction and stop
@@ -167,19 +170,36 @@ current user-level patch scope. Hook payloads are recursively redacted and
 capped at 64 KiB; sensitive reads and writes hide file contents while retaining
 the operation metadata needed by the audit trail.
 
+### Claude Desktop Cowork on Windows
+
+In addition to the existing MCP registration, a Windows Desktop Patch monitors
+the selected user's Cowork `audit.jsonl` files under the roaming, `Claude-3p`
+and MSIX session directories. Existing files start at EOF, so Patch and aiguard
+restart do not import history; new activity is polled about once per second.
+Status distinguishes a missing audit directory, an empty directory, a read
+error and an active monitor.
+
+Cowork text creates prompt/response records containing only the Unicode
+character count. Tool and MCP calls create an `attempted` record followed by a
+matching `success` or `failure`; inputs are redacted and bounded, and result
+bodies, message text and thinking are not stored. This is post-execution audit
+and cannot block a call. Independent Desktop Chat, cloud sessions, SSH and
+remote WSL activity are outside this local log and hook integration.
+
 ## Records
 
-A record is what an agent says it did, pushed from an installed hook. Records
-cover behaviour interception can never see — a local tool call or a session
-reset — and carry a verdict only when the operation went through `/api/enforce`:
-which policy set ruled, whether it was allowed, and the one-line reason a block
-happened.
+A record is what an agent says it did, pushed from an installed hook or read
+from its Cowork audit log. Records cover behaviour interception can never see —
+a local tool call or a session reset — and carry a verdict only when the
+operation went through `/api/enforce`: which policy set ruled, whether it was
+allowed, and the one-line reason a block happened.
 
-Claude Code records are audit-only: they do not call Casbin, block execution,
-or populate `Resource`, `Intent` or `PolicySet`, so the UI shows them as
-**logged** and does not offer feedback learning. Hook payloads are recursively
-redacted and capped at 64 KiB before leaving the hook process. Transcript paths,
-assistant response text and compaction summaries are not stored.
+Claude Code and Cowork records are audit-only: they do not call Casbin, block
+execution, or populate `Resource`, `Intent` or `PolicySet`, so the UI shows
+them as **logged** and does not offer feedback learning. Hook payloads are
+recursively redacted and capped at 64 KiB before leaving the hook process.
+Transcript paths, assistant response text and compaction summaries are not
+stored.
 
 ![Records](docs/images/records.png)
 
@@ -398,6 +418,7 @@ agent/                  per-OS scanners + fingerprints of known AI agents
 patch/                  per-agent instrumentation and file backup journal
 mcpserver/              aiguard as an MCP server (how Claude Desktop is patched)
 agenthook/              shared command-hook normalizer and reporter
+agentmonitor/           Windows Cowork audit.jsonl monitor
 auditutil/              shared payload redaction and size boundary
 object/                 domain models: policy sets, Casbin enforcement, records,
                         events, settings, audit, self-learning

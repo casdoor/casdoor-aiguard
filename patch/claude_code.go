@@ -20,13 +20,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/casdoor/casdoor-aiguard/agenthook"
 	"github.com/casdoor/casdoor-aiguard/conf"
 )
 
-const claudeCodeHookTimeoutSeconds = 5
+const (
+	claudeCodeHookTimeoutSeconds = 5
+	claudeCodeClaimsFlag         = "--aiguard-claims"
+)
 
 var claudeCodeHookEvents = []string{
 	"SessionStart",
@@ -55,78 +59,20 @@ func (claudeCodePatcher) AgentId() string { return "claude-code" }
 
 func (claudeCodePatcher) Supported() bool { return true }
 
-func (p claudeCodePatcher) Patch(target Target) error {
-	configPath, err := p.configPath(target)
-	if err != nil {
-		return err
-	}
-	hookCommand, hookArguments, err := p.hookCommand(target)
-	if err != nil {
-		return err
-	}
-
-	config, mode, _, err := readClaudeCodeConfig(configPath)
-	if err != nil {
-		return err
-	}
-	changed, err := installClaudeCodeHooks(config, hookCommand, hookArguments)
-	if err != nil {
-		return fmt.Errorf("cannot merge Claude Code hooks: %w", err)
-	}
-	if !changed {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return err
-	}
-	return writeClaudeCodeConfig(configPath, config, mode)
+func (claudeCodePatcher) Patch(target Target) error {
+	return updateClaudeCodeHooks(target, true)
 }
 
-func (p claudeCodePatcher) Unpatch(target Target) error {
-	configPath, err := p.configPath(target)
-	if err != nil {
-		return err
-	}
-	config, mode, exists, err := readClaudeCodeConfig(configPath)
-	if err != nil || !exists {
-		return err
-	}
-	if !removeClaudeCodeHooks(config) {
-		return nil
-	}
-	return writeClaudeCodeConfig(configPath, config, mode)
+func (claudeCodePatcher) Unpatch(target Target) error {
+	return updateClaudeCodeHooks(target, false)
 }
 
-func (p claudeCodePatcher) Status(target Target) (Status, error) {
-	configPath, err := p.configPath(target)
-	if err != nil {
-		return Status{}, err
-	}
-	hookCommand, hookArguments, err := p.hookCommand(target)
-	if err != nil {
-		return Status{}, err
-	}
-	config, _, exists, err := readClaudeCodeConfig(configPath)
-	if err != nil {
-		return Status{}, err
-	}
-	if !exists {
-		return Status{Detail: "not patched"}, nil
-	}
-
-	owned, current := claudeCodeHooksState(config, hookCommand, hookArguments)
-	if owned == 0 {
-		return Status{Detail: "not patched"}, nil
-	}
-	if current < len(claudeCodeHookEvents) {
-		return Status{Detail: fmt.Sprintf("user settings hooks need refresh (%d/%d installed, %d/%d current)",
-			owned, len(claudeCodeHookEvents), current, len(claudeCodeHookEvents))}, nil
-	}
-
-	return Status{Patched: true, Detail: "User settings hooks active"}, nil
+func (claudeCodePatcher) Status(target Target) (Status, error) {
+	active, detail, err := claudeCodeHooksStatus(target)
+	return Status{Patched: active, Detail: detail}, err
 }
 
-func (claudeCodePatcher) configPath(target Target) (string, error) {
+func claudeCodeConfigPath(target Target) (string, error) {
 	home, err := homeOf(target)
 	if err != nil {
 		return "", err
@@ -134,17 +80,130 @@ func (claudeCodePatcher) configPath(target Target) (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-func (p claudeCodePatcher) hookCommand(target Target) (string, []string, error) {
+func claudeCodeHookCommand(claims map[string]struct{}) (string, []string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", nil, fmt.Errorf("cannot resolve the aiguard binary to register: %w", err)
 	}
+	names := make([]string, 0, len(claims))
+	for claim := range claims {
+		names = append(names, claim)
+	}
+	sort.Strings(names)
 	return executable, []string{
 		agenthook.Subcommand,
-		"--agent", p.AgentId(),
+		"--agent", "claude-code",
 		"--records-url", conf.GetRecordsIngestUrl(),
-		"--agent-path", target.Path,
+		claudeCodeClaimsFlag, strings.Join(names, ","),
 	}, nil
+}
+
+func updateClaudeCodeHooks(target Target, add bool) error {
+	configPath, err := claudeCodeConfigPath(target)
+	if err != nil {
+		return err
+	}
+	config, mode, exists, err := readClaudeCodeConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if !add && !exists {
+		return nil
+	}
+	claims := claudeCodeHookClaims(config)
+	if add {
+		claims[target.AgentId] = struct{}{}
+	} else {
+		if _, ok := claims[target.AgentId]; !ok {
+			return nil
+		}
+		delete(claims, target.AgentId)
+	}
+
+	changed := false
+	if len(claims) == 0 {
+		changed = removeClaudeCodeHooks(config)
+	} else {
+		command, arguments, err := claudeCodeHookCommand(claims)
+		if err != nil {
+			return err
+		}
+		changed, err = installClaudeCodeHooks(config, command, arguments)
+		if err != nil {
+			return fmt.Errorf("cannot merge Claude Code hooks: %w", err)
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if add {
+		if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+			return err
+		}
+	}
+	return writeClaudeCodeConfig(configPath, config, mode)
+}
+
+func claudeCodeHooksStatus(target Target) (bool, string, error) {
+	configPath, err := claudeCodeConfigPath(target)
+	if err != nil {
+		return false, "", err
+	}
+	config, _, exists, err := readClaudeCodeConfig(configPath)
+	if err != nil {
+		return false, "", err
+	}
+	if !exists {
+		return false, "Code hooks missing", nil
+	}
+	claims := claudeCodeHookClaims(config)
+	if _, ok := claims[target.AgentId]; !ok {
+		return false, "Code hooks missing", nil
+	}
+	command, arguments, err := claudeCodeHookCommand(claims)
+	if err != nil {
+		return false, "", err
+	}
+	owned, current := claudeCodeHooksState(config, command, arguments)
+	if current < len(claudeCodeHookEvents) {
+		return false, fmt.Sprintf("Code hooks need refresh (%d/%d installed, %d/%d current)",
+			owned, len(claudeCodeHookEvents), current, len(claudeCodeHookEvents)), nil
+	}
+	return true, "Code hooks active", nil
+}
+
+func claudeCodeHookClaims(config map[string]any) map[string]struct{} {
+	claims := map[string]struct{}{}
+	hooks, _ := objectValue(config["hooks"])
+	owned := false
+	for _, eventName := range claudeCodeHookEvents {
+		groups, _ := hooks[eventName].([]any)
+		for _, rawGroup := range groups {
+			group, _ := objectValue(rawGroup)
+			handlers, _ := group["hooks"].([]any)
+			for _, rawHandler := range handlers {
+				handler, ok := objectValue(rawHandler)
+				if !ok || !isAiguardHookHandler(handler) {
+					continue
+				}
+				owned = true
+				arguments := stringArrayValue(handler["args"])
+				index := slices.Index(arguments, claudeCodeClaimsFlag)
+				if index < 0 || index+1 >= len(arguments) {
+					continue
+				}
+				for _, claim := range strings.Split(arguments[index+1], ",") {
+					if claim == "claude-code" || claim == "claude-desktop" {
+						claims[claim] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	if owned && len(claims) == 0 {
+		claims["claude-code"] = struct{}{}
+	}
+	return claims
 }
 
 func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error) {

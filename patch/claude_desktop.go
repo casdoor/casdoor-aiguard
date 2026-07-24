@@ -16,29 +16,21 @@ package patch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/casdoor/casdoor-aiguard/agentmonitor"
 	"github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/mcpserver"
 )
 
-// Claude Desktop is the hardest of the agents to instrument, and the shape of
-// the patch follows from that. It is a packaged application: no hook directory,
-// no event scripts, no CLI to drive. The one extension point its user can
-// configure is the MCP server list in claude_desktop_config.json, so that is
-// what the patch writes to - registering the aiguard binary itself as an MCP
-// server, which the app then launches over stdio (see package mcpserver).
-//
-// Two consequences worth being clear about. The app reads that file only at
-// launch, so a patch takes effect on the next restart and there is no command
-// aiguard can run to hurry it along. And an MCP server sees only the traffic
-// addressed to it: the records this yields are the session handshake and the
-// tool calls the model routes through aiguard, not the app's conversations.
-// Interception (the Events page) remains the way to see the rest.
+// Claude Desktop keeps the existing cross-platform MCP registration. On
+// Windows the same Patch also tails Cowork audit logs and installs the command
+// hooks shared by Claude Code CLI and Desktop's Code tab.
 
 const claudeDesktopServerName = "casdoor-aiguard"
 
@@ -62,7 +54,7 @@ func (p claudeDesktopPatcher) Patch(target Target) error {
 		return err
 	}
 
-	return Apply(target, func(changes *ChangeSet) error {
+	if err := Apply(target, func(changes *ChangeSet) error {
 		if err := changes.MkdirAll(filepath.Dir(configPath)); err != nil {
 			return err
 		}
@@ -78,13 +70,26 @@ func (p claudeDesktopPatcher) Patch(target Target) error {
 			return err
 		}
 		return changes.WriteFile(configPath, append(updated, '\n'), 0o600)
-	})
+	}); err != nil || runtime.GOOS != "windows" {
+		return err
+	}
+	if err := updateClaudeCodeHooks(target, true); err != nil {
+		return err
+	}
+	return agentmonitor.Enable(target.Path, target.Owner)
 }
 
 func (p claudeDesktopPatcher) Unpatch(target Target) error {
 	// Revert restores claude_desktop_config.json to its exact pre-patch bytes,
 	// which removes the server entry along with anything else the patch wrote.
-	return Revert(target)
+	if runtime.GOOS != "windows" {
+		return Revert(target)
+	}
+	return errors.Join(
+		Revert(target),
+		updateClaudeCodeHooks(target, false),
+		agentmonitor.Disable(target.Path),
+	)
 }
 
 func (p claudeDesktopPatcher) Status(target Target) (Status, error) {
@@ -111,7 +116,19 @@ func (p claudeDesktopPatcher) Status(target Target) (Status, error) {
 	if !IsApplied(target) {
 		return Status{Patched: true, Detail: "patched outside aiguard: unpatch cannot restore the original config"}, nil
 	}
-	return Status{Patched: true, Detail: "restart Claude Desktop to apply - it reads its config only at launch"}, nil
+	if runtime.GOOS != "windows" {
+		return Status{Patched: true, Detail: "restart Claude Desktop to apply - it reads its config only at launch"}, nil
+	}
+
+	monitorActive, monitorDetail := agentmonitor.Status(target.Path)
+	hooksActive, hooksDetail, err := claudeCodeHooksStatus(target)
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{
+		Patched: monitorActive && hooksActive,
+		Detail:  "MCP server registered; " + monitorDetail + "; " + hooksDetail,
+	}, nil
 }
 
 // serverEntry is the MCP server registration Claude Desktop launches. It points

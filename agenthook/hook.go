@@ -25,7 +25,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/casdoor/casdoor-aiguard/auditutil"
@@ -124,6 +123,7 @@ func Run(args []string, input io.Reader) error {
 	agentId := flags.String("agent", "", "id of the agent that invoked the hook")
 	recordsUrl := flags.String("records-url", "", "aiguard records ingest endpoint")
 	agentPath := flags.String("agent-path", "", "path of the agent installation")
+	flags.String("aiguard-claims", "", "internal Patch ownership claims")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -186,33 +186,17 @@ func Normalize(agentId string, event map[string]any, agentPath string, now time.
 	if rule.detailField != "" {
 		record.Detail = auditutil.SanitizeString(stringValue(event[rule.detailField]))
 	}
-	if isMcp := setMcpTarget(record, profile.mcpPrefix); rule.tool && isMcp {
-		record.EventType = "mcp"
+	if server, tool, isMcp := auditutil.ParseMcpTool(record.ToolName, profile.mcpPrefix); isMcp {
+		record.McpServer = server
+		record.McpTool = tool
+		if rule.tool {
+			record.EventType = "mcp"
+		}
 	}
 
 	payload := preparePayload(profile, event, record.ToolName)
 	record.Object = encodePayload(payload)
 	return record
-}
-
-func setMcpTarget(record *object.Record, prefix string) bool {
-	server, tool, ok := parseMcpTool(record.ToolName, prefix)
-	if ok {
-		record.McpServer = server
-		record.McpTool = tool
-	}
-	return ok
-}
-
-func parseMcpTool(name string, prefix string) (string, string, bool) {
-	if prefix == "" || !strings.HasPrefix(name, prefix) {
-		return "", "", false
-	}
-	parts := strings.SplitN(strings.TrimPrefix(name, prefix), "__", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func preparePayload(profile hookProfile, event map[string]any, toolName string) map[string]any {
