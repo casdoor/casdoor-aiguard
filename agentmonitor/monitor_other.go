@@ -19,3 +19,9 @@ package agentmonitor
 func Start() error { return nil }
 
 func Stop() {}
+
+func Enable(string, string) error { return nil }
+
+func Disable(string) error { return nil }
+
+func Status(string) (bool, string) { return false, "Cowork monitoring is only supported on Windows" }

@@ -123,6 +123,7 @@ func Run(args []string, input io.Reader) error {
 	agentId := flags.String("agent", "", "id of the agent that invoked the hook")
 	recordsUrl := flags.String("records-url", "", "aiguard records ingest endpoint")
 	agentPath := flags.String("agent-path", "", "path of the agent installation")
+	flags.String("aiguard-claims", "", "internal Patch ownership claims")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

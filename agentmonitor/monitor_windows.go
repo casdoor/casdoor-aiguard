@@ -18,11 +18,9 @@ package agentmonitor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -45,12 +43,11 @@ type monitorState struct {
 
 type monitorManager struct {
 	mutex      sync.Mutex
-	loaded     bool
 	targets    map[string]monitorTarget
 	transcript *transcriptMonitor
 }
 
-var desktopMonitor monitorManager
+var desktopMonitor = monitorManager{targets: map[string]monitorTarget{}}
 
 // Start restores the installations the operator previously patched and begins
 // watching their Cowork audit logs from the current end of each file.
@@ -58,8 +55,20 @@ func Start() error {
 	desktopMonitor.mutex.Lock()
 	defer desktopMonitor.mutex.Unlock()
 
-	if err := desktopMonitor.loadLocked(); err != nil {
+	data, err := os.ReadFile(monitorStatePath())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
 		return err
+	}
+	var saved monitorState
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return fmt.Errorf("cannot parse Claude Desktop monitor state: %w", err)
+	}
+	for _, target := range saved.Targets {
+		target.Path = filepath.Clean(target.Path)
+		desktopMonitor.targets[targetKey(target.Path)] = target
 	}
 	if len(desktopMonitor.targets) != 0 && desktopMonitor.transcript == nil {
 		desktopMonitor.transcript = newTranscriptMonitor(desktopMonitor.targets)
@@ -81,18 +90,12 @@ func Stop() {
 // does not need to be running; a session directory created later is picked up
 // by the transcript monitor.
 func Enable(path, owner string) error {
-	target, err := normalizeTarget(path, owner)
-	if err != nil {
-		return err
-	}
+	target := monitorTarget{Path: filepath.Clean(path), Owner: strings.TrimSpace(owner)}
 
 	desktopMonitor.mutex.Lock()
 	defer desktopMonitor.mutex.Unlock()
-	if err := desktopMonitor.loadLocked(); err != nil {
-		return err
-	}
 
-	key := targetKey(target)
+	key := targetKey(target.Path)
 	previous, existed := desktopMonitor.targets[key]
 	desktopMonitor.targets[key] = target
 	if err := desktopMonitor.saveLocked(); err != nil {
@@ -113,18 +116,10 @@ func Enable(path, owner string) error {
 }
 
 func Disable(path string) error {
-	target, err := normalizeTarget(path, "")
-	if err != nil {
-		return err
-	}
-
 	desktopMonitor.mutex.Lock()
 	defer desktopMonitor.mutex.Unlock()
-	if err := desktopMonitor.loadLocked(); err != nil {
-		return err
-	}
 
-	key := targetKey(target)
+	key := targetKey(path)
 	previous, existed := desktopMonitor.targets[key]
 	if !existed {
 		return nil
@@ -148,54 +143,36 @@ func Disable(path string) error {
 }
 
 func Status(path string) (bool, string) {
-	target, err := normalizeTarget(path, "")
-	if err != nil {
-		return false, err.Error()
-	}
-
 	desktopMonitor.mutex.Lock()
 	defer desktopMonitor.mutex.Unlock()
-	if err := desktopMonitor.loadLocked(); err != nil {
-		return false, err.Error()
-	}
-	if _, ok := desktopMonitor.targets[targetKey(target)]; !ok {
+	if _, ok := desktopMonitor.targets[targetKey(path)]; !ok {
 		return false, "not patched"
 	}
 	if desktopMonitor.transcript == nil {
 		return true, "Cowork transcript monitor enabled but inactive"
 	}
-	if err := desktopMonitor.transcript.Err(); err != nil {
-		return true, "Cowork transcript monitor error: " + err.Error()
-	}
-	return true, "Cowork transcript monitor active"
-}
-
-func (m *monitorManager) loadLocked() error {
-	if m.loaded {
-		return nil
-	}
-	m.loaded = true
-	m.targets = map[string]monitorTarget{}
-
-	data, err := os.ReadFile(monitorStatePath())
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var saved monitorState
-	if err := json.Unmarshal(data, &saved); err != nil {
-		return fmt.Errorf("cannot parse Claude Desktop monitor state: %w", err)
-	}
-	for _, target := range saved.Targets {
-		normalized, err := normalizeTarget(target.Path, target.Owner)
-		if err != nil {
-			return fmt.Errorf("invalid Claude Desktop monitor target: %w", err)
+	status := desktopMonitor.transcript.Status()
+	if status.lastErr != nil {
+		detail := "Cowork transcript monitor error: " + status.lastErr.Error()
+		if len(status.existingRoots) != 0 {
+			detail += "; discovered paths: " + strings.Join(status.existingRoots, ", ")
 		}
-		m.targets[targetKey(normalized)] = normalized
+		return true, detail
 	}
-	return nil
+	if len(status.existingRoots) == 0 {
+		return true, "Cowork monitor enabled, but no audit directory was found; checked: " +
+			strings.Join(status.configuredRoots, ", ")
+	}
+	if status.auditFileCount == 0 {
+		return true, "Cowork monitor enabled, but no audit.jsonl was found; paths: " +
+			strings.Join(status.existingRoots, ", ")
+	}
+	return true, fmt.Sprintf(
+		"Cowork transcript monitor active: %d audit.jsonl file(s); last successful poll %s; paths: %s",
+		status.auditFileCount,
+		status.lastSuccessfulPoll.Format("2006-01-02T15:04:05.000Z07:00"),
+		strings.Join(status.existingRoots, ", "),
+	)
 }
 
 func (m *monitorManager) saveLocked() error {
@@ -210,14 +187,9 @@ func (m *monitorManager) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(m.targets))
-	for key := range m.targets {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	saved := monitorState{Targets: make([]monitorTarget, 0, len(keys))}
-	for _, key := range keys {
-		saved.Targets = append(saved.Targets, m.targets[key])
+	saved := monitorState{Targets: make([]monitorTarget, 0, len(m.targets))}
+	for _, target := range m.targets {
+		saved.Targets = append(saved.Targets, target)
 	}
 	data, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
@@ -226,19 +198,8 @@ func (m *monitorManager) saveLocked() error {
 	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
-func normalizeTarget(path, owner string) (monitorTarget, error) {
-	if strings.TrimSpace(path) == "" {
-		return monitorTarget{}, errors.New("target path is required")
-	}
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return monitorTarget{}, err
-	}
-	return monitorTarget{Path: filepath.Clean(path), Owner: strings.TrimSpace(owner)}, nil
-}
-
-func targetKey(target monitorTarget) string {
-	return strings.ToLower(filepath.Clean(target.Path))
+func targetKey(path string) string {
+	return strings.ToLower(filepath.Clean(path))
 }
 
 func monitorStatePath() string {

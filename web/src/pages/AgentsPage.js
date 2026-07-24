@@ -77,8 +77,8 @@ export default function AgentsPage() {
       <Popconfirm
         title={record.patched ? `Unpatch ${record.name}?` : `Patch ${record.name}?`}
         description={record.patched
-          ? "Disables aiguard's behaviour collection and removes its instrumentation."
-          : "Enables behaviour collection for this installation on the host."}
+          ? "Removes aiguard's hooks and restores every file the patch changed."
+          : "Installs aiguard's hooks so this agent streams its behaviour to Records."}
         okText={record.patched ? "Unpatch" : "Patch"}
         onConfirm={() => togglePatch(record)}
       >

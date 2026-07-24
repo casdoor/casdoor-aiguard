@@ -121,8 +121,9 @@ func GetRecordLogFile() string {
 	return file
 }
 
-// GetPatchStateDir holds patch manifests, file backups and persistent monitor
-// targets.
+// GetPatchStateDir holds what aiguard needs to undo a patch: one manifest per
+// patched agent plus the backups of every file the patch overwrote. Losing it
+// means losing the ability to unpatch cleanly.
 func GetPatchStateDir() string {
 	dir := GetConfigString("patchStateDir")
 	if dir == "" {

@@ -24,9 +24,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/casdoor/casdoor-aiguard/auditutil"
 	"github.com/casdoor/casdoor-aiguard/object"
@@ -81,13 +83,24 @@ func (call pendingToolCall) record(when time.Time, outcome string) *object.Recor
 }
 
 type transcriptMonitor struct {
-	mutex   sync.Mutex
-	roots   map[string]transcriptRoot
-	offsets map[string]int64
-	pending map[string]pendingToolCall
-	stop    chan struct{}
-	done    chan struct{}
-	lastErr error
+	mutex              sync.Mutex
+	roots              map[string]transcriptRoot
+	offsets            map[string]int64
+	pending            map[string]pendingToolCall
+	stop               chan struct{}
+	done               chan struct{}
+	existingRoots      []string
+	auditFileCount     int
+	lastSuccessfulPoll time.Time
+	lastErr            error
+}
+
+type transcriptStatus struct {
+	configuredRoots    []string
+	existingRoots      []string
+	auditFileCount     int
+	lastSuccessfulPoll time.Time
+	lastErr            error
 }
 
 func newTranscriptMonitor(targets map[string]monitorTarget) *transcriptMonitor {
@@ -99,6 +112,7 @@ func newTranscriptMonitor(targets map[string]monitorTarget) *transcriptMonitor {
 		done:    make(chan struct{}),
 	}
 	monitor.SetTargets(targets)
+	monitor.poll()
 	go monitor.run()
 	return monitor
 }
@@ -132,6 +146,7 @@ func (m *transcriptMonitor) SetTargets(targets map[string]monitorTarget) {
 		}
 		for _, root := range []string{
 			filepath.Join(roaming, "Claude", "local-agent-mode-sessions"),
+			filepath.Join(local, "Claude-3p", "local-agent-mode-sessions"),
 			filepath.Join(local, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "local-agent-mode-sessions"),
 		} {
 			root = filepath.Clean(root)
@@ -148,7 +163,7 @@ func (m *transcriptMonitor) SetTargets(targets map[string]monitorTarget) {
 		if _, exists := m.roots[key]; exists {
 			continue
 		}
-		files, err := auditFiles(root.path)
+		files, _, err := auditFiles(root.path)
 		if err != nil {
 			m.lastErr = err
 			continue
@@ -167,10 +182,21 @@ func (m *transcriptMonitor) Stop() {
 	<-m.done
 }
 
-func (m *transcriptMonitor) Err() error {
+func (m *transcriptMonitor) Status() transcriptStatus {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	return m.lastErr
+
+	status := transcriptStatus{
+		existingRoots:      append([]string(nil), m.existingRoots...),
+		auditFileCount:     m.auditFileCount,
+		lastSuccessfulPoll: m.lastSuccessfulPoll,
+		lastErr:            m.lastErr,
+	}
+	for _, root := range m.roots {
+		status.configuredRoots = append(status.configuredRoots, root.path)
+	}
+	sort.Strings(status.configuredRoots)
+	return status
 }
 
 func (m *transcriptMonitor) run() {
@@ -192,23 +218,44 @@ func (m *transcriptMonitor) poll() {
 	defer m.mutex.Unlock()
 
 	m.lastErr = nil
+	m.existingRoots = nil
+	m.auditFileCount = 0
 	for _, root := range m.roots {
-		files, err := auditFiles(root.path)
+		files, exists, err := auditFiles(root.path)
+		if exists {
+			m.existingRoots = append(m.existingRoots, root.path)
+		}
 		if err != nil {
 			m.lastErr = err
 			continue
 		}
+		m.auditFileCount += len(files)
 		for _, path := range files {
 			if err := m.consumeFile(path, root.target); err != nil {
 				m.lastErr = err
 			}
 		}
 	}
+	sort.Strings(m.existingRoots)
+	if m.lastErr == nil {
+		m.lastSuccessfulPoll = time.Now()
+	}
 }
 
-func auditFiles(root string) ([]string, error) {
+func auditFiles(root string) ([]string, bool, error) {
+	info, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !info.IsDir() {
+		return nil, true, errors.New("Cowork audit root is not a directory: " + root)
+	}
+
 	var result []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -223,10 +270,7 @@ func auditFiles(root string) ([]string, error) {
 		}
 		return nil
 	})
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	return result, err
+	return result, true, err
 }
 
 func (m *transcriptMonitor) consumeFile(path string, target monitorTarget) error {
@@ -308,15 +352,28 @@ func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line 
 		content = nested
 	}
 	var blocks []map[string]any
+	contentLength := 0
 	switch value := content.(type) {
+	case string:
+		contentLength = utf8.RuneCountInString(value)
 	case []any:
 		for _, item := range value {
-			if block, ok := item.(map[string]any); ok {
+			switch item := item.(type) {
+			case string:
+				contentLength += utf8.RuneCountInString(item)
+			case map[string]any:
+				block := item
 				blocks = append(blocks, block)
+				if transcriptField(block, "type") == "text" {
+					contentLength += utf8.RuneCountInString(transcriptField(block, "text"))
+				}
 			}
 		}
 	case map[string]any:
 		blocks = append(blocks, value)
+		if transcriptField(value, "type") == "text" {
+			contentLength = utf8.RuneCountInString(transcriptField(value, "text"))
+		}
 	}
 	session := transcriptField(entry, "sessionId", "session_id")
 	if session == "" {
@@ -331,6 +388,30 @@ func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line 
 		if parsed, err := time.Parse(time.RFC3339Nano, timestamp); err == nil {
 			when = parsed
 		}
+	}
+
+	role := transcriptField(message, "role")
+	if role == "" {
+		role = transcriptField(entry, "role", "type")
+	}
+	if contentLength > 0 && (role == "user" || role == "assistant") {
+		eventType, action, outcome := "prompt", "submitted", "attempted"
+		if role == "assistant" {
+			eventType, action, outcome = "response", "completed", "success"
+		}
+		payload, _ := json.Marshal(map[string]int{"contentLength": contentLength})
+		object.AddRecord(&object.Record{
+			CreatedTime: when.Format("2006-01-02T15:04:05.000Z07:00"),
+			Agent:       claudeDesktopAgentID,
+			AgentPath:   target.Path,
+			User:        target.Owner,
+			EventType:   eventType,
+			Action:      action,
+			Outcome:     outcome,
+			SessionKey:  session,
+			Model:       model,
+			Object:      string(payload),
+		})
 	}
 
 	for _, block := range blocks {

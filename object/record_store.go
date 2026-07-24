@@ -66,8 +66,8 @@ func InitRecordLog() error {
 	return nil
 }
 
-// AddRecord stores one agent behaviour record in the Records ring buffer and
-// as one JSON line in the record log.
+// AddRecord stores one behaviour record reported by a patched agent: into the
+// ring buffer for the Records page, and as one JSON line in the record log.
 func AddRecord(r *Record) {
 	r.normalize()
 

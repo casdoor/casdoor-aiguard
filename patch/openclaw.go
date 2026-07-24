@@ -161,15 +161,9 @@ func renderOpenclawHandler(target Target) string {
 // in it: the file is round-tripped as a generic tree, so settings aiguard knows
 // nothing about survive untouched.
 func (p openclawPatcher) enableHook(changes *ChangeSet, configPath string) error {
-	data, err := changes.ReadFile(configPath)
+	config, err := readJSONObject(changes, configPath)
 	if err != nil {
 		return err
-	}
-	config := map[string]any{}
-	if len(strings.TrimSpace(string(data))) != 0 {
-		if err := json.Unmarshal(data, &config); err != nil {
-			return fmt.Errorf("cannot parse %s: %w", configPath, err)
-		}
 	}
 
 	hooks := childObject(config, "hooks")

@@ -23,6 +23,7 @@ import (
 	"github.com/casdoor/casdoor-aiguard/agentmonitor"
 	"github.com/casdoor/casdoor-aiguard/auth"
 	_ "github.com/casdoor/casdoor-aiguard/conf"
+	"github.com/casdoor/casdoor-aiguard/mcpserver"
 	"github.com/casdoor/casdoor-aiguard/object"
 	"github.com/casdoor/casdoor-aiguard/proxy"
 	"github.com/casdoor/casdoor-aiguard/routers"
@@ -32,6 +33,9 @@ import (
 func main() {
 	// Records and exits when an agent launched this binary as a command hook.
 	agenthook.ServeIfInvoked()
+
+	// Serves and exits when an agent launched this binary as its MCP server.
+	mcpserver.ServeIfInvoked()
 
 	util.LogRuntimeEnv()
 

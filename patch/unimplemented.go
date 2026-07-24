@@ -20,9 +20,12 @@ package patch
 // apart from "we have never heard of this agent".
 //
 // To implement an agent, replace its embedded unimplemented with real Patch,
-// Unpatch and Status methods. openclaw.go is the file-based example: Patch
-// routes every edit through a ChangeSet, which is what makes Unpatch a matter
-// of calling Revert.
+// Unpatch and Status methods. There are two worked examples to follow from,
+// depending on what the agent offers: openclaw.go installs a hook into an agent
+// that has an event system, and claude_desktop.go registers aiguard as an MCP
+// server for an agent that has none. Either way, Patch must route every
+// filesystem edit through the ChangeSet it is handed, which is what makes
+// Unpatch a matter of calling Revert.
 type unimplemented struct {
 	id string
 }

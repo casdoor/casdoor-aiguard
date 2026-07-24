@@ -136,11 +136,12 @@ type PolicySet struct {
 
 // interceptCapableAgents is the set of agents aiguard can inject a policy
 // decision into today, keyed by the display name a policy set stores in "agent".
-// OpenClaw is guarded by the hook in patch/openclaw_hook.js. Every other agent
-// is instrumented or monitored for reporting only, so its sets cannot be
-// enabled until an intercept path exists.
+// OpenClaw is guarded by the hook in patch/openclaw_hook.js and Claude Desktop
+// by the MCP server in mcpserver/. Every other agent is instrumented for
+// reporting only, so its sets cannot be enabled until an intercept path exists.
 var interceptCapableAgents = map[string]bool{
-	"OpenClaw": true,
+	"OpenClaw":       true,
+	"Claude Desktop": true,
 }
 
 // IsInterceptCapableAgent reports whether a set written for this agent (by its

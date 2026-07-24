@@ -20,24 +20,25 @@ import (
 	"github.com/google/uuid"
 )
 
-// maxRecordObjectBytes caps the payload stored per record. Producers already
-// trim their payloads; this is the store-side backstop.
+// maxRecordObjectBytes caps the payload stored per record. Patched agents
+// already trim what they send; this is the server-side backstop.
 const maxRecordObjectBytes = 64 * 1024
 
-// Record is one agent behaviour-log entry, modelled on Casdoor's object.Record
-// so the two audit trails read the same way.
+// Record is one behaviour-log entry reported by a patched agent, modelled on
+// Casdoor's object.Record so the two audit trails read the same way.
 //
 // It is the counterpart to Event, and the distinction matters: an Event is
-// traffic aiguard intercepted and ruled on, while a Record is collected from
-// an agent hook or audit monitor. Records cover agent behaviour that may never
-// pass through the interception proxy.
+// traffic aiguard intercepted from the outside and ruled on, while a Record is
+// what the agent says it did, pushed from a hook aiguard installed inside it.
+// Records cover behaviour that never touches the network - a session reset, a
+// local tool call - which interception cannot see at all.
 type Record struct {
 	Id          string `json:"id"`
 	Owner       string `json:"owner"`
 	Name        string `json:"name"`
 	CreatedTime string `json:"createdTime"`
 
-	// Which patched agent this describes, and from where.
+	// Which patched agent reported this, and from where.
 	Agent     string `json:"agent"`
 	AgentPath string `json:"agentPath,omitempty"`
 	ClientIp  string `json:"clientIp,omitempty"`
@@ -55,7 +56,9 @@ type Record struct {
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
 
-	// Correlation and operation identity emitted by semantic collectors.
+	// Correlation and operation identity emitted by agent hooks. Keeping them as
+	// first-class fields makes the Records page useful without coupling it to a
+	// particular hook's raw payload shape.
 	PromptId  string `json:"promptId,omitempty"`
 	ToolUseId string `json:"toolUseId,omitempty"`
 	ToolName  string `json:"toolName,omitempty"`
