@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package patch instruments the AI agents the agent package discovers, so a
-// patched agent streams its behaviour log to aiguard in real time (see
-// object.Record).
+// Package patch enables behaviour collection for AI agents discovered by the
+// agent package (see object.Record).
 //
-// How an agent is instrumented is entirely agent-specific - OpenClaw takes a
-// hook directory plus a config entry, Claude Code takes hook commands in its
-// settings file - so each agent supplies its own Patcher. What every agent
-// shares is the contract in this file. File-based patchers can use the backup
-// journal in state.go; patchers that edit shared settings can remove only the
-// entries they own.
+// How collection is enabled is agent-specific: OpenClaw takes a hook directory
+// plus a config entry, Claude Code takes hook commands in its settings file,
+// and Claude Desktop watches Windows Cowork audit logs. Each agent supplies its
+// own Patcher. File-based patchers can use the backup journal in state.go;
+// patchers that edit shared settings can remove only the entries they own.
 //
 // Adding an agent means writing one Patcher and registering it; nothing else in
 // aiguard needs to change.
@@ -71,10 +69,10 @@ type Patcher interface {
 	Supported() bool
 	// Status probes the target and reports whether it is currently patched.
 	Status(target Target) (Status, error)
-	// Patch installs or refreshes the agent's hooks.
+	// Patch enables or refreshes behaviour collection for the target.
 	Patch(target Target) error
-	// Unpatch removes everything Patch installed. Patchers that edit shared,
-	// mergeable settings must preserve unrelated changes made later.
+	// Unpatch disables collection and removes anything Patch installed.
+	// Patchers that edit shared settings must preserve unrelated later changes.
 	Unpatch(target Target) error
 }
 

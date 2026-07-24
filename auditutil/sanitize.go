@@ -79,6 +79,19 @@ func SanitizeString(value string) string {
 	return credentialPattern.ReplaceAllString(value, "[REDACTED]")
 }
 
+// ParseMcpTool splits the canonical MCP tool name used by Claude hooks and
+// transcripts: mcp__<server>__<tool>.
+func ParseMcpTool(name, prefix string) (string, string, bool) {
+	if prefix == "" || !strings.HasPrefix(name, prefix) {
+		return "", "", false
+	}
+	parts := strings.SplitN(strings.TrimPrefix(name, prefix), "__", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 // SanitizeToolInput hides content written to a sensitive file while retaining
 // the operation metadata needed to understand the audit record.
 func SanitizeToolInput(toolName string, input any) any {

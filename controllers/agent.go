@@ -47,7 +47,7 @@ func (c *ApiController) GetAgents() {
 
 // PatchAgent
 // @Title PatchAgent
-// @Description install aiguard's hooks into one agent installation, so it reports its behaviour as records
+// @Description enable aiguard behaviour collection for one agent installation
 // @router /agents/patch [post]
 func (c *ApiController) PatchAgent() {
 	target, ok := c.readTarget()
@@ -63,7 +63,7 @@ func (c *ApiController) PatchAgent() {
 
 // UnpatchAgent
 // @Title UnpatchAgent
-// @Description remove aiguard's hooks from one agent installation, restoring every file the patch changed
+// @Description disable aiguard behaviour collection for one agent installation
 // @router /agents/unpatch [post]
 func (c *ApiController) UnpatchAgent() {
 	target, ok := c.readTarget()

@@ -21,19 +21,20 @@
   </a>
 </p>
 
-**A policy enforcement point (PEP) for AI agents.** casdoor-aiguard runs on the
-machine your AI agents run on, sees what each agent is about to do — an MCP tool
-call, a shell command, an outbound HTTP request — and decides whether to **allow**
-or **block** it, using [Casbin](https://github.com/casbin/casbin) policy sets and
-[Casdoor](https://github.com/casdoor/casdoor) as the identity and policy authority.
+**A policy enforcement and host-audit point for AI agents.** casdoor-aiguard
+runs on the machine your AI agents run on. Where an agent exposes an intercept
+path, aiguard can decide whether to **allow** or **block** an operation using
+[Casbin](https://github.com/casbin/casbin) and
+[Casdoor](https://github.com/casdoor/casdoor). Audit-only integrations record
+what happened without claiming they can block it.
 
 > If Casdoor is the *door*, casdoor-aiguard is the officer standing at it,
-> inspecting every agent one by one and deciding whether to let it through.
+> recording what agents do and enforcing a decision where an intercept path
+> exists.
 
 The defining constraint: **you never modify an agent's code.** aiguard discovers
-the agents installed on the host, instruments them through the extension points
-they already have (hook files, MCP server entries), or intercepts their egress
-below them — and it can undo every change it made.
+installed agents, uses supported hook surfaces, observes selected host activity,
+or intercepts egress below the agent. Patch state is explicit and reversible.
 
 ![Dashboard](docs/images/dashboard.png)
 
@@ -62,23 +63,18 @@ below them — and it can undo every change it made.
 
 ## How it works
 
-aiguard guards an agent along two independent paths. Both end in the same
-place: one Casbin triple, evaluated against the policy sets enabled for that
-agent, and one record on the Records page.
+aiguard uses three independent paths. Agent hooks and the Windows Cowork audit
+monitor produce Records. Egress interception produces Events and can enforce a
+Casbin decision. An audit-only path never pretends its event was blocked.
 
 ```
-  ┌─ path 1: instrumentation (works on any OS) ────────────────────────────┐
-  │  agent/       scan the host for installed agents (Claude Desktop,      │
-  │               Claude Code, OpenClaw, Codex CLI, Cursor, Windsurf, …)   │
-  │  patch/       instrument one through its own extension point:          │
-  │                 • OpenClaw       → a hook in its hook directory        │
-  │                 • Claude Desktop → aiguard registered as an MCP server │
-  │               shared settings are edited without replacing user data   │
-  │  the patched agent then posts each operation to aiguard before doing   │
-  │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
+  ┌─ agent integrations ───────────────────────────────────────────────────┐
+  │  OpenClaw       hook → /api/enforce → allow / deny + Record            │
+  │  Claude Code    async command hooks → audit-only Records               │
+  │  Claude Desktop Windows Cowork audit tail → audit-only Records         │
   └────────────────────────────────────────────────────────────────────────┘
 
-  ┌─ path 2: egress interception (Linux, transparent) ─────────────────────┐
+  ┌─ egress interception (Linux, transparent) ─────────────────────────────┐
   │  iptables/nftables REDIRECT  ──►  aiguard transparent proxy            │
   │   1. terminate TLS with a leaf cert from aiguard's local CA            │
   │   2. recognizers/  extract intent from the plaintext (MCP JSON-RPC,    │
@@ -88,14 +84,14 @@ agent, and one record on the Records page.
   │   5. enforce: allow → forward,  deny → 403                             │
   └────────────────────────────────────────────────────────────────────────┘
 
-                    sub = the agent      ("claude-desktop")
+                    sub = the agent      ("openclaw")
    one triple ──►   obj = the target     ("127.0.0.1#delete_file", "api.anthropic.com")
                     act = the intent     ("mcp.tool_call", "llm.chat", "payment")
 ```
 
-Path 1 sees what interception cannot: local tool calls, shell commands and
-session events that never touch the network. Path 2 sees what an agent will not
-report about itself. Neither requires editing an agent's source.
+Hooks and audit monitoring see local activity that never crosses the proxy.
+Interception sees egress an agent does not report about itself. Only integrations
+that call `/api/enforce` can apply a Policy Hub decision.
 
 ## Quick start
 
@@ -114,12 +110,12 @@ listens on `:9090`.
 
 Then, in the UI:
 
-1. **Agents** — scan the host and patch an agent you want guarded.
-2. **Policy Hub** — enable the policy set for that agent and this OS.
+1. **Agents** — scan the host and patch an agent you want observed.
+2. **Policy Hub** — for an enforcement-capable agent, enable its policy set.
 3. **Records** — use the agent, and watch what it did and what was blocked.
 
-Nothing above needs root, Linux, or Casdoor. Transparent egress interception
-does — see [Interception](#interception).
+Basic management needs neither root nor Casdoor. Transparent Linux interception
+needs root.
 
 ## Agents
 
@@ -130,10 +126,10 @@ heard of.
 
 ![Agents](docs/images/agents.png)
 
-**Patch** instruments an installation; **Unpatch** removes that instrumentation.
-File-based patchers keep backups in `data/patches/`. Claude Code edits its shared
-settings file in place and Unpatch removes only aiguard's current hook handlers,
-so other settings and hooks remain untouched.
+**Patch** enables collection for an installation; **Unpatch** disables it.
+File-based patchers keep backups in `data/patches/`. Claude Code edits its
+shared settings file in place and Unpatch removes only aiguard's current hook
+handlers, so other settings and hooks remain untouched.
 
 How an agent is instrumented is agent-specific, so each agent supplies its own
 patcher (`patch/`):
@@ -141,7 +137,7 @@ patcher (`patch/`):
 | Agent | Extension point used | Status |
 |-------|---------------------|--------|
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
-| **Claude Desktop** | aiguard registers *itself* as an MCP server in `claude_desktop_config.json` and serves MCP over stdio (`mcpserver/`) | supported |
+| **Claude Desktop** | online tail of the selected user's Cowork audit logs; no app config or injection | Windows 10/11, audit only |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
 | Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
@@ -167,19 +163,42 @@ current user-level patch scope. Hook payloads are recursively redacted and
 capped at 64 KiB; sensitive reads and writes hide file contents while retaining
 the operation metadata needed by the audit trail.
 
+### Claude Desktop on Windows
+
+Patch persists the selected executable path and owner in
+`patchStateDir/claude-desktop-monitor.json`, then tails that user's Cowork
+`audit.jsonl` files below the normal and MSIX `local-agent-mode-sessions`
+directories. Claude does not need to be running when Patch is applied; a
+session directory created later is picked up automatically.
+
+Existing files are positioned at EOF when Patch or aiguard starts. New tool
+activity is picked up about once per second, while activity that happened before
+Patch or while aiguard was stopped is not imported. A `tool_use` produces an
+`attempted` record and its matching `tool_result` produces a `success` or
+`failure` record with the same tool-use ID. MCP names in the form
+`mcp__server__tool` are split into their server and tool fields. Tool inputs are
+redacted and capped; result bodies, prompts, responses and model thinking are
+never stored.
+
+This is post-execution Cowork audit, not policy enforcement. Records do not
+populate `Resource`, `Intent` or a policy verdict, and cannot block a call.
+Ordinary Desktop Chat and activity without a local Cowork audit entry remain
+invisible; see Anthropic's
+[Cowork architecture overview](https://support.claude.com/en/articles/14479288-claude-cowork-architecture-overview).
+macOS and Linux Claude Desktop monitoring are not supported.
+
 ## Records
 
-A record is what an agent says it did, pushed from an installed hook. Records
-cover behaviour interception can never see — a local tool call or a session
-reset — and carry a verdict only when the operation went through `/api/enforce`:
-which policy set ruled, whether it was allowed, and the one-line reason a block
-happened.
+A record is behaviour collected from an installed hook or audit monitor. Records
+cover activity interception may never see and carry a verdict only when the
+operation went through `/api/enforce`: which policy set ruled, whether it was
+allowed, and the one-line reason a block happened.
 
-Claude Code records are audit-only: they do not call Casbin, block execution,
-or populate `Resource`, `Intent` or `PolicySet`, so the UI shows them as
-**logged** and does not offer feedback learning. Hook payloads are recursively
-redacted and capped at 64 KiB before leaving the hook process. Transcript paths,
-assistant response text and compaction summaries are not stored.
+Claude Code and Claude Desktop records are audit-only: they do not call Casbin,
+block execution, or populate `Resource`, `Intent` or `PolicySet`, so the UI
+shows them as **logged** and does not offer feedback learning. Hook and Cowork
+tool inputs are recursively redacted and capped at 64 KiB. Transcript paths,
+tool results, assistant response text and compaction summaries are not stored.
 
 ![Records](docs/images/records.png)
 
@@ -200,6 +219,8 @@ may do to your working tree, and what is simply off limits.
 A set can only be enabled when it can actually be enforced. The toggle explains
 itself when it cannot: the agent is not installed, is installed but not patched,
 the set targets another OS, or aiguard cannot guard that agent yet.
+Claude Desktop sets remain visible as policy examples, but cannot be enabled
+because its Cowork integration is audit-only.
 
 Opening a set shows its Casbin model, its policy, and example requests evaluated
 **live in your browser** (node-casbin), so you can read a rule and see the
@@ -211,16 +232,16 @@ A set is a small JSON file:
 
 ```jsonc
 {
-  "displayName": "Claude Desktop on Windows",
-  "description": "Everything Claude Desktop does on Windows while you code …",
+  "displayName": "OpenClaw on Windows",
+  "description": "Everything OpenClaw does on Windows while you code …",
   "author": "Casdoor",
   "strictness": "strict",              // strict | moderate | permissive
-  "agent": "Claude Desktop",           // must match a discovered agent's name
+  "agent": "OpenClaw",                 // must match a discovered agent's name
   "os": "Windows",                     // matched by OS family (Ubuntu ⊂ Linux)
   "tags": ["coding", "llm-egress", "mcp-tools", "winget"],
   "model":   ["[request_definition]", "r = sub, obj, act", "…"],
-  "policy":  ["p, claude-desktop, ^(.+\\.)?anthropic\\.com$, llm\\.chat, allow", "…"],
-  "request": ["claude-desktop, api.anthropic.com, llm.chat", "…"]
+  "policy":  ["p, openclaw, ^(.+\\.)?anthropic\\.com$, llm\\.chat, allow", "…"],
+  "request": ["openclaw, api.anthropic.com, llm.chat", "…"]
 }
 ```
 
@@ -248,8 +269,8 @@ they follow them to any machine aiguard guards. These pages require signing in.
 
 ## Interception
 
-Egress interception is the second path, and the one that needs no cooperation
-from the agent at all. aiguard picks a mode per connection automatically:
+Egress interception is the path that needs no cooperation from the agent.
+aiguard picks a mode per connection automatically:
 
 | Mode | When | How to enable | Needs root? | Agent changes? |
 |------|------|---------------|-------------|----------------|
@@ -305,7 +326,7 @@ overridden by an environment variable of the same name):
 | `policyFile` | `./conf/policy.yaml` | interception rule file |
 | `auditLogFile` | `./logs/audit.log` | append-only JSONL audit log of intercepted events |
 | `recordLogFile` | `./logs/record.log` | append-only JSONL log of agent behaviour records |
-| `patchStateDir` | `./data/patches` | patch manifests and file backups used by file-based patchers |
+| `patchStateDir` | `./data/patches` | patch manifests, file backups and persistent monitor targets |
 | `recordsIngestUrl` | *(empty)* | endpoint baked into installed hooks; set it when the agent runs in a container or WSL |
 | `casdoorEndpoint` | `http://localhost:8000` | Casdoor base URL |
 | `casdoorClientId` / `casdoorClientSecret` | *(empty)* | aiguard's own client credentials |
@@ -362,8 +383,9 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
   identified is passed through untouched (`passthroughUnrecognized = true`), so
   the interception layer never takes down all host traffic.
 - **A stopped aiguard never breaks an agent.** A patched agent that cannot reach
-  `/api/enforce` treats the missing answer as allow, and Claude Code audit hooks
-  always exit successfully even when record delivery fails.
+  `/api/enforce` treats the missing answer as allow. Audit hooks exit
+  successfully when delivery fails, and the Desktop audit monitor never sits
+  in Claude's execution path.
 - **A call no enabled policy set denies is allowed.** Enabling a set is what adds
   enforcement; nothing is blocked by accident.
 - **Step-up defaults to deny** while CIBA is stubbed (`stepUpDefaultAction = deny`).
@@ -375,7 +397,7 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/host-info` | the host aiguard is protecting |
 | `GET /api/auth-config` · `POST /api/signin` · `POST /api/signout` · `GET /api/account` | optional Casdoor operator login |
 | `GET /api/agents` | AI agents installed on this host, with patch status |
-| `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
+| `POST /api/agents/patch` · `POST /api/agents/unpatch` | enable / disable behaviour collection for one installation |
 | `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`; ingest one hook record) |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
 | `POST /api/enforce` | rule on one agent operation and record it |
@@ -396,8 +418,8 @@ main.go                 bootstrap: settings, policy, audit, CA, proxy, web
 conf/                   app.conf, policy.yaml, config helpers
 agent/                  per-OS scanners + fingerprints of known AI agents
 patch/                  per-agent instrumentation and file backup journal
-mcpserver/              aiguard as an MCP server (how Claude Desktop is patched)
 agenthook/              shared command-hook normalizer and reporter
+agentmonitor/           Windows Claude Desktop Cowork audit monitor
 auditutil/              shared payload redaction and size boundary
 object/                 domain models: policy sets, Casbin enforcement, records,
                         events, settings, audit, self-learning
@@ -432,7 +454,7 @@ step-up→deny, passthrough) and run on any OS — no root or iptables needed.
 | Stage | Scope | Status |
 |-------|-------|--------|
 | **1 — MVP** | user-space transparent proxy, local-CA MITM, MCP/HTTP recognition, Casdoor allow/deny, Web UI | **done** |
-| **2** | agent discovery + patching, MCP server instrumentation, Policy Hub, records, digital employee, self-learning, policy fusion | **done** |
+| **2** | agent discovery + patching, hook and host-audit instrumentation, Policy Hub, records, digital employee, self-learning, policy fusion | **done** |
 | **3** | patchers for the remaining agents, real CIBA step-up, single-use token injection on allow, source identity enrichment (PID/cgroup → SPIFFE → Casdoor agent identity) | in progress |
 | **4** | eBPF (sockops redirect / uprobe TLS plaintext), unbypassable kernel enforcement, cross-platform abstraction (Windows WFP) | planned |
 
