@@ -57,7 +57,11 @@ func main() {
 	if err := agentmonitor.Start(); err != nil {
 		logs.Error("agent monitor could not start: %v", err)
 	}
+	if err := agentmonitor.StartCodexMonitor(); err != nil {
+		logs.Error("Codex rollout monitor could not start: %v", err)
+	}
 	defer agentmonitor.Stop()
+	defer agentmonitor.StopCodexMonitor()
 
 	ca, err := proxy.LoadOrCreateCA()
 	if err != nil {

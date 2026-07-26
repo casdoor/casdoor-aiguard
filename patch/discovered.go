@@ -21,9 +21,6 @@ package patch
 // writing the real patcher needs.
 func init() {
 	for _, id := range []string{
-		// Reads ~/.codex/config.toml, whose [mcp_servers] table registers MCP
-		// servers and whose notify key names a program to run per turn.
-		"codex-cli",
 		// A VS Code fork: settings live in the editor's User/settings.json and
 		// MCP servers in the workspace or user mcp.json.
 		"cursor",

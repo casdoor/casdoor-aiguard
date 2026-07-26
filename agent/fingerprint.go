@@ -15,7 +15,7 @@
 package agent
 
 import (
-	"path/filepath"
+	pathpkg "path"
 	"strings"
 )
 
@@ -77,7 +77,7 @@ type Fingerprint struct {
 }
 
 // fingerprints is the registry of agents aiguard knows how to recognize.
-var fingerprints = []Fingerprint{
+var fingerprints = append([]Fingerprint{
 	{
 		ID:            "claude-code",
 		DisplayName:   "Claude Code",
@@ -107,15 +107,6 @@ var fingerprints = []Fingerprint{
 		CmdMarkers:          []string{"openclaw"},
 	},
 	{
-		ID:          "codex-cli",
-		DisplayName: "Codex CLI",
-		ExecName:    "codex",
-		NpmPackage:  "@openai/codex",
-		// The Codex installer keeps the launcher, its helpers and a bundled
-		// Node runtime in one bin directory of its own.
-		WindowsUserDirs: []string{"OpenAI/Codex/bin"},
-	},
-	{
 		ID:          "cursor",
 		DisplayName: "Cursor",
 		ExecName:    "Cursor",
@@ -140,7 +131,7 @@ var fingerprints = []Fingerprint{
 		WindowsProgramDirs: []string{"Windsurf"},
 		HomebrewCasks:      []string{"windsurf"},
 	},
-}
+}, codexFingerprints...)
 
 // Directories that hold an agent launcher once a system or Homebrew package
 // manager has installed it.
@@ -309,7 +300,10 @@ func IdentifyExecutable(path string) string {
 	if path == "" {
 		return ""
 	}
-	normalized := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	// filepath.Clean only recognizes separators for the host OS. Explicitly
+	// fold Windows separators first so Windows fixtures and remote process
+	// paths match correctly even when aiguard is built or tested on Unix.
+	normalized := strings.ToLower(pathpkg.Clean(strings.ReplaceAll(path, `\`, "/")))
 	for _, fingerprint := range compiledFingerprints {
 		for _, rule := range fingerprint.execRules {
 			if rule.matches(normalized) {
