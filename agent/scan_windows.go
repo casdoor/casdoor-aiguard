@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -50,6 +51,10 @@ func Scan() []Installation {
 		installations = append(installations, scanMachinePrograms(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
+	for _, home := range homes {
+		installations = append(installations, scanHermesWindows(home)...)
+	}
+	installations = append(installations, scanHermesOnPath()...)
 
 	installations = dedupeInstallations(installations)
 	// Whatever layout an installation came from, its launcher may carry a
@@ -132,6 +137,19 @@ func appDataDir(home homeDir, kind, variable string) string {
 
 func localAppData(home homeDir) string   { return appDataDir(home, "Local", "LOCALAPPDATA") }
 func roamingAppData(home homeDir) string { return appDataDir(home, "Roaming", "APPDATA") }
+
+func scanHermesWindows(home homeDir) []Installation {
+	hermesHome := filepath.Join(localAppData(home), "hermes")
+	if current, err := os.UserHomeDir(); err == nil &&
+		strings.EqualFold(filepath.Clean(current), filepath.Clean(home.path)) {
+		if configured := os.Getenv("HERMES_HOME"); configured != "" {
+			hermesHome = configured
+		}
+	}
+	root := filepath.Join(hermesHome, hermes.ProjectDir)
+	launcher := filepath.Join(root, "venv", "Scripts", hermes.ExecName+".exe")
+	return hermesInstallation(launcher, home.owner, root)
+}
 
 // scanWindowsNative reports the per-user native installer layout: a launcher at
 // %USERPROFILE%\.local\bin\<exec>.exe backed by a versioned payload directory.

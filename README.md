@@ -74,10 +74,11 @@ agent, and one record on the Records page.
   │                 • OpenClaw       → a hook in its hook directory        │
   │                 • Claude Desktop → aiguard registered as an MCP server │
   │                 • Claude Code    → command hooks in shared settings    │
+  │                 • Hermes Agent   → a metadata-only user plugin         │
   │               Windows Desktop also tails Cowork audit.jsonl files      │
   │               shared settings are edited without replacing user data   │
-  │  the patched agent then posts each operation to aiguard before doing   │
-  │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
+  │  audit integrations POST /api/records; enforcement integrations use    │
+  │  POST /api/enforce  →  allow / deny  →  the agent obeys                 │
   └────────────────────────────────────────────────────────────────────────┘
 
   ┌─ path 2: egress interception (Linux, transparent) ─────────────────────┐
@@ -145,6 +146,7 @@ patcher (`patch/`):
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
 | **Claude Desktop** | MCP server registration; on Windows, Cowork `audit.jsonl` plus the shared Claude Code hooks | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
+| **Hermes Agent** | metadata-only observer plugin in the default Hermes profile | supported (audit only) |
 | Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
 Adding an agent means writing one `patch.Patcher` and registering it; nothing
@@ -170,6 +172,24 @@ current user-level patch scope. Hook payloads are recursively redacted and
 capped at 64 KiB; sensitive reads and writes hide file contents while retaining
 the operation metadata needed by the audit trail.
 
+### Hermes Agent observer
+
+Hermes Agent is discovered from its verified Python project and official
+launcher layouts on Linux, macOS and Windows. Patch installs
+`casdoor-aiguard-observer` under the default Hermes profile, enables it in
+`config.yaml`, and leaves named profiles untouched. A running Hermes process
+loads plugins only at startup, so it must be restarted after Patch or Unpatch;
+aiguard never restarts it automatically. Unpatch restores the pre-Patch
+`config.yaml` snapshot, so profile changes made while patched are not retained.
+
+The observer uses Hermes' API, tool, session and subagent lifecycle hooks.
+LLM records contain provider/model, counts, token usage, status and duration;
+tool and MCP records contain names, correlation IDs, status and duration.
+Prompts, responses, reasoning, tool arguments/results, error text and subagent
+goal/summary text are never serialized. Delivery is asynchronous, bounded and
+fail-open: an unavailable aiguard or a full queue can lose audit records but
+cannot delay or change the agent's operation.
+
 ### Claude Desktop Cowork on Windows
 
 In addition to the existing MCP registration, a Windows Desktop Patch monitors
@@ -194,12 +214,13 @@ a local tool call or a session reset — and carry a verdict only when the
 operation went through `/api/enforce`: which policy set ruled, whether it was
 allowed, and the one-line reason a block happened.
 
-Claude Code and Cowork records are audit-only: they do not call Casbin, block
-execution, or populate `Resource`, `Intent` or `PolicySet`, so the UI shows
-them as **logged** and does not offer feedback learning. Hook payloads are
-recursively redacted and capped at 64 KiB before leaving the hook process.
-Transcript paths, assistant response text and compaction summaries are not
-stored.
+Claude Code, Cowork and Hermes Agent records are audit-only: they do not call
+Casbin, block execution, or populate `Resource`, `Intent` or `PolicySet`, so
+the UI shows them as **logged** and does not offer feedback learning. Claude
+hook payloads are recursively redacted and capped at 64 KiB before leaving the
+hook process. Hermes emits only an allowlist of metadata and numeric lengths.
+Transcript paths, prompts, assistant response text, tool payloads and
+compaction summaries are not stored.
 
 ![Records](docs/images/records.png)
 

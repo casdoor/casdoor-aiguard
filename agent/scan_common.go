@@ -17,10 +17,14 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 )
 
 // maxPackageJSONSize bounds how much of a candidate manifest we are willing to
@@ -140,4 +144,55 @@ func findExecutablePath(files, execName string) string {
 		}
 	}
 	return ""
+}
+
+func hermesInstallation(launcher, owner string, officialRoots ...string) []Installation {
+	project, err := hermes.InspectLauncher(launcher, officialRoots...)
+	if err != nil {
+		return nil
+	}
+	method := "source"
+	for _, root := range officialRoots {
+		if sameHermesPath(root, project.Root) {
+			method = "native"
+			break
+		}
+	}
+	return []Installation{{
+		AgentId: hermes.AgentID, Name: hermes.DisplayName, Version: project.Version,
+		Path: launcher, InstallMethod: method, Owner: owner,
+	}}
+}
+
+// scanHermesOnPath covers an activated development checkout or a launcher
+// symlinked somewhere other than the official installer location.
+func scanHermesOnPath() []Installation {
+	launcher, err := exec.LookPath(hermes.ExecName)
+	if err != nil && runtime.GOOS == "windows" {
+		launcher, err = exec.LookPath(hermes.ExecName + ".exe")
+	}
+	if err != nil {
+		return nil
+	}
+	owner := ""
+	if account, userErr := user.Current(); userErr == nil {
+		owner = account.Username
+	}
+	return hermesInstallation(launcher, owner)
+}
+
+func sameHermesPath(left, right string) bool {
+	leftResolved, leftErr := filepath.EvalSymlinks(left)
+	rightResolved, rightErr := filepath.EvalSymlinks(right)
+	if leftErr == nil {
+		left = leftResolved
+	}
+	if rightErr == nil {
+		right = rightResolved
+	}
+	left, right = filepath.Clean(left), filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }

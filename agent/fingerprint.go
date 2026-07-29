@@ -116,6 +116,19 @@ var fingerprints = []Fingerprint{
 		WindowsUserDirs: []string{"OpenAI/Codex/bin"},
 	},
 	{
+		ID:          "hermes-agent",
+		DisplayName: "Hermes Agent",
+		ExecName:    "hermes",
+		CmdMarkers:  []string{"hermes_cli", "/hermes-agent/hermes", `\hermes-agent\hermes`},
+		ExtraExecRules: []PathRule{
+			{Suffix: "/.local/bin/hermes"},
+			{Exact: "/usr/local/bin/hermes"},
+			{Contains: []string{"/hermes-agent/venv/bin/python"}},
+			{Contains: []string{"/hermes-agent/venv/scripts/python"}},
+			{Contains: []string{"/hermes/hermes-agent/venv/scripts/hermes.exe"}},
+		},
+	},
+	{
 		ID:          "cursor",
 		DisplayName: "Cursor",
 		ExecName:    "Cursor",
@@ -309,7 +322,10 @@ func IdentifyExecutable(path string) string {
 	if path == "" {
 		return ""
 	}
-	normalized := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+	// filepath.ToSlash only replaces the separator of the host OS. Tests,
+	// remote process inventories and saved records can still hand a Linux
+	// build a Windows path, so normalize backslashes explicitly as well.
+	normalized := strings.ToLower(strings.ReplaceAll(filepath.ToSlash(filepath.Clean(path)), `\`, "/"))
 	for _, fingerprint := range compiledFingerprints {
 		for _, rule := range fingerprint.execRules {
 			if rule.matches(normalized) {

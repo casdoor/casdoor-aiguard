@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 )
 
 // Scan finds installations of every known agent without executing any
@@ -42,6 +44,16 @@ func Scan() []Installation {
 		installations = append(installations, scanHomebrew(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
+	for _, home := range homes {
+		installations = append(installations, scanHermesUnix(home, filepath.Join(home.path, ".local", "bin", hermes.ExecName))...)
+	}
+	installations = append(installations, scanHermesUnix(
+		homeDir{owner: "root", path: "/root"},
+		filepath.Join("/usr/local/bin", hermes.ExecName),
+		filepath.Join("/usr/local/lib", hermes.ProjectDir),
+		filepath.Join("/root/.hermes", hermes.ProjectDir),
+	)...)
+	installations = append(installations, scanHermesOnPath()...)
 	return dedupeInstallations(installations)
 }
 

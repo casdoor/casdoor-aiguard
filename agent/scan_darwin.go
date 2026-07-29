@@ -20,6 +20,8 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 )
 
 // Scan finds installations of every known agent in known macOS layouts. It
@@ -40,6 +42,10 @@ func Scan() []Installation {
 		}
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
+	for _, home := range homes {
+		installations = append(installations, scanHermesUnix(home, filepath.Join(home.path, ".local", "bin", hermes.ExecName))...)
+	}
+	installations = append(installations, scanHermesOnPath()...)
 	return dedupeInstallations(installations)
 }
 
