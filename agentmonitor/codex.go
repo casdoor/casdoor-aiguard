@@ -561,6 +561,15 @@ func (m *codexMonitorManager) loadLocked() error {
 		if cursor.Pending == nil {
 			cursor.Pending = map[string]codexPendingCall{}
 		}
+		if cursor.AgentID == "" && cursor.Path != "" {
+			if meta, err := codexFileHeader(cursor.Path); err == nil && meta.AgentID != "" {
+				cursor.AgentID = meta.AgentID
+				if cursor.SessionKey == "" {
+					cursor.SessionKey = meta.SessionKey
+				}
+				repaired = true
+			}
+		}
 	}
 	m.dirty = repaired
 	return nil

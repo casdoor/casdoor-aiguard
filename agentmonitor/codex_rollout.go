@@ -128,8 +128,10 @@ func decodeCodexLine(line []byte) (codexRolloutEntry, codexRolloutPayload, bool)
 }
 
 func codexAgentForSource(originator string) string {
-	switch originator {
-	case "codex_desktop":
+	source := strings.ToLower(strings.TrimSpace(originator))
+	source = strings.NewReplacer("_", "-", " ", "-").Replace(source)
+	switch source {
+	case "codex-desktop":
 		return "codex"
 	case "codex-tui", "codex-exec":
 		return "codex-cli"
