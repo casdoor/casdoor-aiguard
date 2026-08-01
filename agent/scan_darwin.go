@@ -40,7 +40,9 @@ func Scan() []Installation {
 		}
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
-	return dedupeInstallations(installations)
+	installations = append(installations, scanCodexStandalone()...)
+	installations = append(installations, scanCodexDarwinApps(homes)...)
+	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 
 func darwinHomes() []homeDir {

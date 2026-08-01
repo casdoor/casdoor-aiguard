@@ -145,7 +145,9 @@ patcher (`patch/`):
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
 | **Claude Desktop** | MCP server registration; on Windows, Cowork `audit.jsonl` plus the shared Claude Code hooks | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
-| Codex CLI, Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
+| **ChatGPT Desktop (Codex)** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS) |
+| **Codex CLI** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS/Linux) |
+| Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
 
 Adding an agent means writing one `patch.Patcher` and registering it; nothing
 else in aiguard changes.
@@ -185,6 +187,24 @@ matching `success` or `failure`; inputs are redacted and bounded, and result
 bodies, message text and thinking are not stored. This is post-execution audit
 and cannot block a call. Independent Desktop Chat, cloud sessions, SSH and
 remote WSL activity are outside this local log and hook integration.
+
+### ChatGPT Desktop Codex and Codex CLI rollouts
+
+Patching ChatGPT Desktop's Codex mode or Codex CLI creates only an AIGuard-side
+monitoring claim. It does not edit `$CODEX_HOME/config.toml`, configure OTel,
+or install a hook. Desktop and CLI may share one `$CODEX_HOME`; the rollout's
+explicit source selects an enabled claim, while IDE and unknown sources are
+ignored.
+
+The monitor tails `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Existing files
+start at EOF on first Patch and offsets survive AIGuard restarts. Codex CLI
+runs started with `--ephemeral` do not write rollout files and cannot be
+audited by this integration.
+
+Records contain interaction lengths, available token counts, and Tool/MCP
+identity, result and duration. Prompt/response text, reasoning, tool arguments
+and output are not stored. Rollout monitoring is post-execution audit only and
+cannot block a call or report individual HTTP retries.
 
 ## Records
 

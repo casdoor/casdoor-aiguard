@@ -42,7 +42,8 @@ func Scan() []Installation {
 		installations = append(installations, scanHomebrew(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
 	}
-	return dedupeInstallations(installations)
+	installations = append(installations, scanCodexStandalone()...)
+	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 
 func readHomes(passwdPath string) []homeDir {
