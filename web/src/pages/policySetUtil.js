@@ -60,6 +60,7 @@ export const AGENT_SITES = {
   "Gemini CLI": "gemini.google.com",
   "Google Antigravity": "antigravity.google",
   "Windsurf": "windsurf.com",
+  "OpenAgent": "openagentai.org",
   "Qwen Code": "qwen.ai",
   "Trae": "trae.ai",
   "CodeBuddy": "codebuddy.ai",

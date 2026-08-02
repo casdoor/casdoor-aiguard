@@ -17,15 +17,16 @@ package agentmonitor
 import "errors"
 
 // Start brings up every agent monitor: the Windows-only Cowork transcript
-// monitor and the cross-platform Codex rollout monitor. Each is started
-// independently so a failure in one still lets the other run; the combined
-// error (if any) is returned for logging.
+// monitor, the cross-platform Codex rollout monitor, and the OpenAgent audit-log
+// monitor. Each is started independently so a failure in one still lets the
+// others run; the combined error (if any) is returned for logging.
 func Start() error {
-	return errors.Join(startCoworkMonitor(), codexMonitor.start())
+	return errors.Join(startCoworkMonitor(), codexMonitor.start(), openAgentMonitor.start())
 }
 
-// Stop tears both monitors down.
+// Stop tears every monitor down.
 func Stop() {
 	stopCoworkMonitor()
 	codexMonitor.stopMonitor()
+	openAgentMonitor.stopMonitor()
 }

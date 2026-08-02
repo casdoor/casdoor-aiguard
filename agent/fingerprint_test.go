@@ -62,6 +62,17 @@ func TestIdentifyExecutable(t *testing.T) {
 		{"/home/alice/.local/bin/cursor-agent", "cursor-agent"},
 		// Windsurf.
 		{`C:\Users\alice\AppData\Local\Programs\Windsurf\Windsurf.exe`, "windsurf"},
+		// OpenAgent, whose one-step installer keeps a single binary in a flat
+		// ~/.local/share tree with a launcher symlinked onto PATH, and drops the
+		// same binary under %LOCALAPPDATA% on Windows.
+		{"/home/alice/.local/share/openagent/openagent", "openagent"},
+		{"/home/alice/.local/bin/openagent", "openagent"},
+		{`C:\Users\alice\AppData\Local\openagent\openagent.exe`, "openagent"},
+		// The single binary keeps its name wherever it runs, so a custom install
+		// dir or a build from a source checkout is recognized too.
+		{"/opt/openagent/openagent", "openagent"},
+		{"/home/alice/src/openagent/openagent", "openagent"},
+		{`D:\work\openagent\openagent.exe`, "openagent"},
 		// Unrelated executables must stay unrecognized.
 		{"/usr/bin/node", ""},
 		{"/usr/bin/bash", ""},
