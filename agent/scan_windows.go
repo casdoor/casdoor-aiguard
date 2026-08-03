@@ -49,6 +49,7 @@ func Scan() []Installation {
 		installations = append(installations, scanMachineWinget(fingerprint)...)
 		installations = append(installations, scanMachinePrograms(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
+		fillMissingVersions(installations, mark, fingerprint)
 	}
 
 	installations = expandSharedCodexWindowsInstallations(dedupeInstallations(installations), homes)

@@ -39,6 +39,7 @@ func Scan() []Installation {
 			installations = append(installations, scanDarwinSystemNpm(fingerprint, prefix)...)
 		}
 		stampAgentId(installations, mark, fingerprint.ID)
+		fillMissingVersions(installations, mark, fingerprint)
 	}
 	installations = append(installations, scanCodexStandalone()...)
 	installations = append(installations, scanCodexDarwinApps(homes)...)

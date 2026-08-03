@@ -66,6 +66,19 @@ type Fingerprint struct {
 	HomebrewCasks []string
 	// SystemPackage is the package name used by apt, rpm and apk alike.
 	SystemPackage string
+	// BuildInfoModule is the Go main-module path of an agent built in Go. When
+	// set, a scan reads the binary's embedded build metadata (without executing
+	// it) to recover a version an install layout with no versioned directory or
+	// manifest cannot supply.
+	BuildInfoModule string
+	// BuildInfoVersionVar is the -ldflags -X variable the agent stamps its own
+	// version into, preferred over the module version because it is the version
+	// the agent reports about itself.
+	BuildInfoVersionVar string
+	// VersionFile is a plain-text file, next to the binary, whose first line is
+	// the version. It is the fallback for release binaries stripped of build
+	// metadata (-trimpath, UPX), which the agent writes there itself at startup.
+	VersionFile string
 
 	// CmdMarkers are substrings that identify the agent in a process command
 	// line. Runtimes like Node.js report a generic comm ("node"), so the agent
@@ -130,6 +143,39 @@ var fingerprints = append([]Fingerprint{
 		ExecName:           "Windsurf",
 		WindowsProgramDirs: []string{"Windsurf"},
 		HomebrewCasks:      []string{"windsurf"},
+	},
+	{
+		ID:          "openagent",
+		DisplayName: "OpenAgent",
+		ExecName:    "openagent",
+		// The one-step installer lays out a flat tree, not the versioned one the
+		// other native installers use: the single binary sits directly in
+		// ~/.local/share/openagent with a launcher symlinked onto PATH at
+		// ~/.local/bin/openagent, so StateDir finds the launcher while the
+		// version stays empty. On Windows the same binary lands in
+		// %LOCALAPPDATA%\openagent.
+		StateDir:        "openagent",
+		WindowsUserDirs: []string{"openagent"},
+		// The flat installer has no versioned directory or manifest, so the version
+		// comes from the binary's own build metadata: OpenAgent stamps its version
+		// into internal/cli.Version via -ldflags, which a scan reads without ever
+		// starting the server.
+		BuildInfoModule:     "github.com/the-open-agent/openagent",
+		BuildInfoVersionVar: "github.com/the-open-agent/openagent/internal/cli.Version",
+		VersionFile:         "version",
+		// OpenAgent ships as a single binary named "openagent", so its executable
+		// path ends in "/openagent" (or "/openagent.exe") wherever it runs from -
+		// the packaged install, a custom directory, or a build from source. The
+		// interception layer resolves a process's real /proc/<pid>/exe, so
+		// matching the basename attributes a running OpenAgent at any path, the
+		// same way the cmdline markers do for the interpreter-hosted agents. The
+		// name is distinctive enough to carry the match on its own. (The Agents
+		// scan still only lists known install layouts; it never walks the disk,
+		// so a source checkout is identified when it runs, not enumerated.)
+		ExtraExecRules: []PathRule{
+			{Suffix: "/openagent"},
+			{Suffix: "/openagent.exe"},
+		},
 	},
 }, codexFingerprints...)
 

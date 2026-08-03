@@ -41,6 +41,7 @@ func Scan() []Installation {
 		installations = append(installations, scanSystemPackages(fingerprint)...)
 		installations = append(installations, scanHomebrew(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
+		fillMissingVersions(installations, mark, fingerprint)
 	}
 	installations = append(installations, scanCodexStandalone()...)
 	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
