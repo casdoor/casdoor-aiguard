@@ -44,6 +44,9 @@ func Scan() []Installation {
 		fillMissingVersions(installations, mark, fingerprint)
 	}
 	installations = append(installations, scanCodexStandalone()...)
+	// Last, so that an agent found both on disk and by its port keeps the
+	// richer install-layout row when the two resolve to the same executable.
+	installations = append(installations, scanLocalServers()...)
 	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 

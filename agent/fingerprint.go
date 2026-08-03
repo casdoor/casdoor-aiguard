@@ -17,6 +17,8 @@ package agent
 import (
 	pathpkg "path"
 	"strings"
+
+	"github.com/casdoor/casdoor-aiguard/localserver"
 )
 
 // Fingerprint is the complete per-agent data set. Everything that differs
@@ -87,6 +89,12 @@ type Fingerprint struct {
 	// ExtraExecRules covers executable layouts that the fields above do not
 	// imply. Most agents need none.
 	ExtraExecRules []PathRule
+
+	// LocalServer describes the HTTP server the agent runs on the loopback
+	// interface, so a scan can find it by the port it answers on even when its
+	// binary sits outside every layout above. Nil for agents that run no
+	// server; see the localserver package for what the fields mean.
+	LocalServer *localserver.Server
 }
 
 // fingerprints is the registry of agents aiguard knows how to recognize.
@@ -175,6 +183,32 @@ var fingerprints = append([]Fingerprint{
 		ExtraExecRules: []PathRule{
 			{Suffix: "/openagent"},
 			{Suffix: "/openagent.exe"},
+		},
+		// OpenAgent is a server: it serves its whole UI and API from one port,
+		// 14000 by default, so a running instance can be found by asking that
+		// port who it is. That reaches installations no layout covers - a build
+		// run straight out of a source checkout, most of all - which is why it
+		// is worth a probe on top of the paths above.
+		//
+		// The probe endpoint is the unauthenticated health check, and the marker
+		// is the session cookie OpenAgent names after itself
+		// (beego.BConfig.WebConfig.Session.SessionName in its main.go). The
+		// cookie rides on every response, including error ones, so the marker
+		// holds even when the server is unhappy or its frontend was never built.
+		//
+		// A running OpenAgent also reports its own version, which beats reading
+		// it out of the binary: a server answering "v2.87.0" settles what is
+		// actually running, where build metadata can be stripped or absent.
+		// Note that /api/get-version-info is not on OpenAgent's anonymous
+		// casbin policy today, so it answers "this operation requires admin
+		// privilege" to a scan and the version falls back to the binary's build
+		// info until that endpoint is opened up the way /api/health is.
+		LocalServer: &localserver.Server{
+			Ports:         []int{14000},
+			ProbePath:     "/api/health",
+			ProbeMarkers:  []string{"openagent_session_id"},
+			VersionPath:   "/api/get-version-info",
+			VersionFields: []string{"data", "version"},
 		},
 	},
 }, codexFingerprints...)

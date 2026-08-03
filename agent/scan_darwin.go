@@ -43,6 +43,9 @@ func Scan() []Installation {
 	}
 	installations = append(installations, scanCodexStandalone()...)
 	installations = append(installations, scanCodexDarwinApps(homes)...)
+	// Last, so that an agent found both on disk and by its port keeps the
+	// richer install-layout row when the two resolve to the same executable.
+	installations = append(installations, scanLocalServers()...)
 	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 
