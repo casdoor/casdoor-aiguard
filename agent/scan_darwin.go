@@ -43,6 +43,7 @@ func Scan() []Installation {
 	}
 	installations = append(installations, scanCodexStandalone()...)
 	installations = append(installations, scanCodexDarwinApps(homes)...)
+	installations = append(installations, scanRunningProcesses()...)
 	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 

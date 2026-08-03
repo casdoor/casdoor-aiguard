@@ -52,6 +52,7 @@ func Scan() []Installation {
 		fillMissingVersions(installations, mark, fingerprint)
 	}
 
+	installations = append(installations, scanRunningProcesses()...)
 	installations = expandSharedCodexWindowsInstallations(dedupeInstallations(installations), homes)
 	// Whatever layout an installation came from, its launcher may carry a
 	// version resource, so fall back to that rather than reporting no version.

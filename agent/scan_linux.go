@@ -44,6 +44,7 @@ func Scan() []Installation {
 		fillMissingVersions(installations, mark, fingerprint)
 	}
 	installations = append(installations, scanCodexStandalone()...)
+	installations = append(installations, scanRunningProcesses()...)
 	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 
