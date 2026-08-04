@@ -339,7 +339,7 @@ def _on_session_end(**values: Any) -> None:
         interrupted=interrupted,
         exitReason=_text(values.get("turn_exit_reason")),
     )
-    _enqueue(_base_record("turn", "end", outcome, values, data))
+    _enqueue(_base_record("session", "end", outcome, values, data))
 
 
 def _on_subagent_start(**values: Any) -> None:

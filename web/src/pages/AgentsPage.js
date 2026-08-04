@@ -22,6 +22,7 @@ import {AgentIcon} from "./policySetUtil";
 const {Title, Text} = Typography;
 
 const rowKey = (record) => `${record.owner}:${record.path}`;
+const isCodexRollout = (record) => record.agentId === "codex" || record.agentId === "codex-cli";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -80,6 +81,10 @@ export default function AgentsPage() {
       ? (record.patched
         ? "Removes the metadata-only observer from the default profile. Running Hermes processes keep it loaded until restarted."
         : "Installs a metadata-only observer in the default profile. Restart an already-running Hermes process to begin recording.")
+      : isCodexRollout(record)
+        ? (record.patched
+          ? "Stops AIGuard rollout monitoring. Codex files and configuration stay unchanged."
+          : "Enables audit-only rollout monitoring inside AIGuard. No Codex config, OTel or hooks are installed.")
       : (record.patched
         ? "Removes aiguard's hooks and restores every file the patch changed."
         : "Installs aiguard's hooks so this agent streams its behaviour to Records.");

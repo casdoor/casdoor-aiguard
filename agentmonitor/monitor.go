@@ -12,16 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-
 package agentmonitor
 
-func startCoworkMonitor() error { return nil }
+import "errors"
 
-func stopCoworkMonitor() {}
+// Start brings up every agent monitor: the Windows-only Cowork transcript
+// monitor, the cross-platform Codex rollout monitor, and the OpenAgent audit-log
+// monitor. Each is started independently so a failure in one still lets the
+// others run; the combined error (if any) is returned for logging.
+func Start() error {
+	return errors.Join(startCoworkMonitor(), codexMonitor.start(), openAgentMonitor.start())
+}
 
-func Enable(string, string) error { return nil }
-
-func Disable(string) error { return nil }
-
-func Status(string) (bool, string) { return false, "Cowork monitoring is only supported on Windows" }
+// Stop tears every monitor down.
+func Stop() {
+	stopCoworkMonitor()
+	codexMonitor.stopMonitor()
+	openAgentMonitor.stopMonitor()
+}

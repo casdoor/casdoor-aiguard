@@ -49,9 +49,9 @@ type monitorManager struct {
 
 var desktopMonitor = monitorManager{targets: map[string]monitorTarget{}}
 
-// Start restores the installations the operator previously patched and begins
-// watching their Cowork audit logs from the current end of each file.
-func Start() error {
+// startCoworkMonitor restores the installations the operator previously patched
+// and begins watching their Cowork audit logs from the current end of each file.
+func startCoworkMonitor() error {
 	desktopMonitor.mutex.Lock()
 	defer desktopMonitor.mutex.Unlock()
 
@@ -76,7 +76,7 @@ func Start() error {
 	return nil
 }
 
-func Stop() {
+func stopCoworkMonitor() {
 	desktopMonitor.mutex.Lock()
 	transcript := desktopMonitor.transcript
 	desktopMonitor.transcript = nil

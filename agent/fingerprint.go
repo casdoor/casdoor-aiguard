@@ -15,8 +15,10 @@
 package agent
 
 import (
-	"path/filepath"
+	pathpkg "path"
 	"strings"
+
+	"github.com/casdoor/casdoor-aiguard/localserver"
 )
 
 // Fingerprint is the complete per-agent data set. Everything that differs
@@ -66,6 +68,19 @@ type Fingerprint struct {
 	HomebrewCasks []string
 	// SystemPackage is the package name used by apt, rpm and apk alike.
 	SystemPackage string
+	// BuildInfoModule is the Go main-module path of an agent built in Go. When
+	// set, a scan reads the binary's embedded build metadata (without executing
+	// it) to recover a version an install layout with no versioned directory or
+	// manifest cannot supply.
+	BuildInfoModule string
+	// BuildInfoVersionVar is the -ldflags -X variable the agent stamps its own
+	// version into, preferred over the module version because it is the version
+	// the agent reports about itself.
+	BuildInfoVersionVar string
+	// VersionFile is a plain-text file, next to the binary, whose first line is
+	// the version. It is the fallback for release binaries stripped of build
+	// metadata (-trimpath, UPX), which the agent writes there itself at startup.
+	VersionFile string
 
 	// CmdMarkers are substrings that identify the agent in a process command
 	// line. Runtimes like Node.js report a generic comm ("node"), so the agent
@@ -74,10 +89,16 @@ type Fingerprint struct {
 	// ExtraExecRules covers executable layouts that the fields above do not
 	// imply. Most agents need none.
 	ExtraExecRules []PathRule
+
+	// LocalServer describes the HTTP server the agent runs on the loopback
+	// interface, so a scan can find it by the port it answers on even when its
+	// binary sits outside every layout above. Nil for agents that run no
+	// server; see the localserver package for what the fields mean.
+	LocalServer *localserver.Server
 }
 
 // fingerprints is the registry of agents aiguard knows how to recognize.
-var fingerprints = []Fingerprint{
+var fingerprints = append([]Fingerprint{
 	{
 		ID:            "claude-code",
 		DisplayName:   "Claude Code",
@@ -105,15 +126,6 @@ var fingerprints = []Fingerprint{
 		ExtraUnixNpmDirs:    []string{".openclaw/tools/node-v*/lib"},
 		ExtraWindowsNpmDirs: []string{"OpenClaw/deps/portable-node"},
 		CmdMarkers:          []string{"openclaw"},
-	},
-	{
-		ID:          "codex-cli",
-		DisplayName: "Codex CLI",
-		ExecName:    "codex",
-		NpmPackage:  "@openai/codex",
-		// The Codex installer keeps the launcher, its helpers and a bundled
-		// Node runtime in one bin directory of its own.
-		WindowsUserDirs: []string{"OpenAI/Codex/bin"},
 	},
 	{
 		ID:          "hermes-agent",
@@ -153,7 +165,66 @@ var fingerprints = []Fingerprint{
 		WindowsProgramDirs: []string{"Windsurf"},
 		HomebrewCasks:      []string{"windsurf"},
 	},
-}
+	{
+		ID:          "openagent",
+		DisplayName: "OpenAgent",
+		ExecName:    "openagent",
+		// The one-step installer lays out a flat tree, not the versioned one the
+		// other native installers use: the single binary sits directly in
+		// ~/.local/share/openagent with a launcher symlinked onto PATH at
+		// ~/.local/bin/openagent, so StateDir finds the launcher while the
+		// version stays empty. On Windows the same binary lands in
+		// %LOCALAPPDATA%\openagent.
+		StateDir:        "openagent",
+		WindowsUserDirs: []string{"openagent"},
+		// The flat installer has no versioned directory or manifest, so the version
+		// comes from the binary's own build metadata: OpenAgent stamps its version
+		// into internal/cli.Version via -ldflags, which a scan reads without ever
+		// starting the server.
+		BuildInfoModule:     "github.com/the-open-agent/openagent",
+		BuildInfoVersionVar: "github.com/the-open-agent/openagent/internal/cli.Version",
+		VersionFile:         "version",
+		// OpenAgent ships as a single binary named "openagent", so its executable
+		// path ends in "/openagent" (or "/openagent.exe") wherever it runs from -
+		// the packaged install, a custom directory, or a build from source. The
+		// interception layer resolves a process's real /proc/<pid>/exe, so
+		// matching the basename attributes a running OpenAgent at any path, the
+		// same way the cmdline markers do for the interpreter-hosted agents. The
+		// name is distinctive enough to carry the match on its own. (The Agents
+		// scan still only lists known install layouts; it never walks the disk,
+		// so a source checkout is identified when it runs, not enumerated.)
+		ExtraExecRules: []PathRule{
+			{Suffix: "/openagent"},
+			{Suffix: "/openagent.exe"},
+		},
+		// OpenAgent is a server: it serves its whole UI and API from one port,
+		// 14000 by default, so a running instance can be found by asking that
+		// port who it is. That reaches installations no layout covers - a build
+		// run straight out of a source checkout, most of all - which is why it
+		// is worth a probe on top of the paths above.
+		//
+		// The probe endpoint is the unauthenticated health check, and the marker
+		// is the session cookie OpenAgent names after itself
+		// (beego.BConfig.WebConfig.Session.SessionName in its main.go). The
+		// cookie rides on every response, including error ones, so the marker
+		// holds even when the server is unhappy or its frontend was never built.
+		//
+		// A running OpenAgent also reports its own version, which beats reading
+		// it out of the binary: a server answering "v2.87.0" settles what is
+		// actually running, where build metadata can be stripped or absent.
+		// Note that /api/get-version-info is not on OpenAgent's anonymous
+		// casbin policy today, so it answers "this operation requires admin
+		// privilege" to a scan and the version falls back to the binary's build
+		// info until that endpoint is opened up the way /api/health is.
+		LocalServer: &localserver.Server{
+			Ports:         []int{14000},
+			ProbePath:     "/api/health",
+			ProbeMarkers:  []string{"openagent_session_id"},
+			VersionPath:   "/api/get-version-info",
+			VersionFields: []string{"data", "version"},
+		},
+	},
+}, codexFingerprints...)
 
 // Directories that hold an agent launcher once a system or Homebrew package
 // manager has installed it.
@@ -322,10 +393,10 @@ func IdentifyExecutable(path string) string {
 	if path == "" {
 		return ""
 	}
-	// filepath.ToSlash only replaces the separator of the host OS. Tests,
-	// remote process inventories and saved records can still hand a Linux
-	// build a Windows path, so normalize backslashes explicitly as well.
-	normalized := strings.ToLower(strings.ReplaceAll(filepath.ToSlash(filepath.Clean(path)), `\`, "/"))
+	// filepath.Clean only recognizes separators for the host OS. Explicitly
+	// fold Windows separators first so Windows fixtures and remote process
+	// paths match correctly even when aiguard is built or tested on Unix.
+	normalized := strings.ToLower(pathpkg.Clean(strings.ReplaceAll(path, `\`, "/")))
 	for _, fingerprint := range compiledFingerprints {
 		for _, rule := range fingerprint.execRules {
 			if rule.matches(normalized) {

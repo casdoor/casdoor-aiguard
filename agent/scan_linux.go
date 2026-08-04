@@ -43,6 +43,7 @@ func Scan() []Installation {
 		installations = append(installations, scanSystemPackages(fingerprint)...)
 		installations = append(installations, scanHomebrew(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
+		fillMissingVersions(installations, mark, fingerprint)
 	}
 	for _, home := range homes {
 		installations = append(installations, scanHermesUnix(home, filepath.Join(home.path, ".local", "bin", hermes.ExecName))...)
@@ -54,7 +55,11 @@ func Scan() []Installation {
 		filepath.Join("/root/.hermes", hermes.ProjectDir),
 	)...)
 	installations = append(installations, scanHermesOnPath()...)
-	return dedupeInstallations(installations)
+	installations = append(installations, scanCodexStandalone()...)
+	// Last, so that an agent found both on disk and by its port keeps the
+	// richer install-layout row when the two resolve to the same executable.
+	installations = append(installations, scanLocalServers()...)
+	return expandSharedCodexInstallations(dedupeInstallations(installations), homes)
 }
 
 func readHomes(passwdPath string) []homeDir {

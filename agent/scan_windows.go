@@ -50,13 +50,18 @@ func Scan() []Installation {
 		installations = append(installations, scanMachineWinget(fingerprint)...)
 		installations = append(installations, scanMachinePrograms(fingerprint)...)
 		stampAgentId(installations, mark, fingerprint.ID)
+		fillMissingVersions(installations, mark, fingerprint)
 	}
 	for _, home := range homes {
 		installations = append(installations, scanHermesWindows(home)...)
 	}
 	installations = append(installations, scanHermesOnPath()...)
 
-	installations = dedupeInstallations(installations)
+	// Last, so that an agent found both on disk and by its port keeps the
+	// richer install-layout row when the two resolve to the same executable.
+	installations = append(installations, scanLocalServers()...)
+
+	installations = expandSharedCodexWindowsInstallations(dedupeInstallations(installations), homes)
 	// Whatever layout an installation came from, its launcher may carry a
 	// version resource, so fall back to that rather than reporting no version.
 	for i := range installations {
