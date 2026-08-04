@@ -44,6 +44,7 @@ below them — and it can undo every change it made.
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
 - [Agents](#agents)
+- [Sessions](#sessions)
 - [Records](#records)
 - [Policy Hub](#policy-hub)
 - [Digital Employee, Self-Learning and Policy Fusion](#digital-employee-self-learning-and-policy-fusion)
@@ -205,6 +206,20 @@ Records contain interaction lengths, available token counts, and Tool/MCP
 identity, result and duration. Prompt/response text, reasoning, tool arguments
 and output are not stored. Rollout monitoring is post-execution audit only and
 cannot block a call or report individual HTTP retries.
+
+## Sessions
+
+The Sessions page groups records by `sessionKey` - one row per agent run - so
+you can find a session instead of scrolling a flat record log. Click a session
+to open its records, filtered.
+
+Where an agent reports one, the title shown is the agent's own short label for
+the session - for Claude Code, the same title `claude --resume` would show,
+read from the `ai-title` entry its transcript already carries. It is a label
+the agent generated for its own UI, not prompt or response text: aiguard reads
+only that one entry, on session/compact boundary events, and never the
+transcript's message content. A session no agent titled falls back to a
+guess - the first tool it called, or its first event otherwise.
 
 ## Records
 
@@ -416,8 +431,9 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/auth-config` · `POST /api/signin` · `POST /api/signout` · `GET /api/account` | optional Casdoor operator login |
 | `GET /api/agents` | AI agents installed on this host, with patch status |
 | `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
-| `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`; ingest one hook record) |
+| `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`, `session`; ingest one hook record) |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
+| `GET /api/sessions` | records grouped by session, one summary row each, newest first |
 | `POST /api/enforce` | rule on one agent operation and record it |
 | `GET /api/events` | most recent intercepted egress events, newest first |
 | `GET /api/policy-sets` · `GET /api/policy-set` · `POST /api/policy-set/enable` | Policy Hub |

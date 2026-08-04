@@ -66,9 +66,14 @@ export function unpatchAgent(target) {
   return request("/api/agents/unpatch", {method: "POST", body: JSON.stringify(target)});
 }
 
-export function getRecords(agent = "", limit = 200, eventType = "", outcome = "") {
-  const params = new URLSearchParams({agent, limit: String(limit), eventType, outcome});
+export function getRecords(agent = "", limit = 200, eventType = "", outcome = "", session = "") {
+  const params = new URLSearchParams({agent, limit: String(limit), eventType, outcome, session});
   return request(`/api/records?${params.toString()}`);
+}
+
+// One row per session, newest first - the data behind the Sessions page.
+export function getSessions() {
+  return request("/api/sessions");
 }
 
 // Corrects the verdict on one record: feedback is "allow", "deny", or "" to

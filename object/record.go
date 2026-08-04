@@ -24,6 +24,11 @@ import (
 // already trim what they send; this is the server-side backstop.
 const maxRecordObjectBytes = 64 * 1024
 
+// maxRecordTitleBytes is the server-side backstop for Title, mirroring
+// maxRecordObjectBytes: a reporter is expected to send a short label, not
+// truncate it correctly, so aiguard still caps it on the way in.
+const maxRecordTitleBytes = 512
+
 // Record is one behaviour-log entry reported by a patched agent, modelled on
 // Casdoor's object.Record so the two audit trails read the same way.
 //
@@ -55,6 +60,13 @@ type Record struct {
 	SessionKey string `json:"sessionKey,omitempty"`
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
+
+	// Title is the agent's own short label for the session it reported this
+	// record from - e.g. Claude Code's session-picker title - not text
+	// aiguard generated or read out of a prompt. It is optional and only as
+	// fresh as the agent last reported it; the Sessions page falls back to a
+	// guess when a session has none.
+	Title string `json:"title,omitempty"`
 
 	// Correlation and operation identity emitted by agent hooks. Keeping them as
 	// first-class fields makes the Records page useful without coupling it to a
@@ -149,5 +161,8 @@ func (r *Record) normalize() {
 	r.Correctable = r.IsCorrectable()
 	if len(r.Object) > maxRecordObjectBytes {
 		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"
+	}
+	if len(r.Title) > maxRecordTitleBytes {
+		r.Title = r.Title[:maxRecordTitleBytes] + "..."
 	}
 }

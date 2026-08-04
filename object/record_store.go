@@ -158,9 +158,10 @@ func CorrectedRecords() []*Record {
 // RecordFilter narrows the Records page without changing the append-only store.
 // Every field is optional and matching is case-insensitive.
 type RecordFilter struct {
-	Agent     string
-	EventType string
-	Outcome   string
+	Agent      string
+	EventType  string
+	Outcome    string
+	SessionKey string
 }
 
 // ListRecords returns up to `limit` most recent records, newest first. It is
@@ -197,6 +198,9 @@ func ListRecordsFiltered(filter RecordFilter, limit int) []*Record {
 		if filter.Outcome != "" && !strings.EqualFold(record.Outcome, filter.Outcome) {
 			continue
 		}
+		if filter.SessionKey != "" && !strings.EqualFold(record.SessionKey, filter.SessionKey) {
+			continue
+		}
 		result = append(result, record)
 	}
 
@@ -217,4 +221,89 @@ func recordTime(r *Record) time.Time {
 		return time.Time{}
 	}
 	return parsed
+}
+
+// SessionSummary is one row of the Sessions page: everything a session's
+// records have in common, plus what happened during it. Title prefers the
+// real label an agent reports for its own session (see Record.Title) and
+// falls back to a guess - the first tool the session used - for a session no
+// record carried one for, so every row still has something to show.
+type SessionSummary struct {
+	SessionKey   string `json:"sessionKey"`
+	Agent        string `json:"agent"`
+	Title        string `json:"title"`
+	RecordCount  int    `json:"recordCount"`
+	FirstTime    string `json:"firstTime"`
+	LastTime     string `json:"lastTime"`
+	BlockedCount int    `json:"blockedCount"`
+}
+
+// ListSessions groups every buffered record by SessionKey and summarizes each
+// group into one row, newest session first. Records without a SessionKey -
+// lifecycle events some hooks emit outside any session - are not a session
+// and are skipped.
+func ListSessions() []*SessionSummary {
+	all := ListRecordsFiltered(RecordFilter{}, 0) // newest first
+
+	order := []string{}
+	groups := map[string][]*Record{}
+	for _, record := range all {
+		if record.SessionKey == "" {
+			continue
+		}
+		if _, seen := groups[record.SessionKey]; !seen {
+			order = append(order, record.SessionKey)
+		}
+		groups[record.SessionKey] = append(groups[record.SessionKey], record)
+	}
+
+	result := make([]*SessionSummary, 0, len(order))
+	for _, key := range order {
+		group := groups[key] // newest first, since `all` is
+		newest, oldest := group[0], group[len(group)-1]
+		blocked := 0
+		for _, record := range group {
+			if record.Correctable && !record.IsAllowed {
+				blocked++
+			}
+		}
+		result = append(result, &SessionSummary{
+			SessionKey:   key,
+			Agent:        newest.Agent,
+			Title:        sessionTitle(group),
+			RecordCount:  len(group),
+			FirstTime:    oldest.CreatedTime,
+			LastTime:     newest.CreatedTime,
+			BlockedCount: blocked,
+		})
+	}
+	return result
+}
+
+// sessionTitle prefers the most recent real title an agent reported for this
+// session (Record.Title), since that is what the agent itself would show for
+// it. Absent one, it stands in with the first tool or MCP target the session
+// touched, oldest record first, and falls back further to the oldest
+// record's own event/action so every session is titled either way.
+func sessionTitle(newestFirst []*Record) string {
+	for _, record := range newestFirst {
+		if record.Title != "" {
+			return record.Title
+		}
+	}
+
+	for i := len(newestFirst) - 1; i >= 0; i-- {
+		record := newestFirst[i]
+		if record.McpServer != "" {
+			if record.McpTool != "" {
+				return record.McpServer + " / " + record.McpTool
+			}
+			return record.McpServer
+		}
+		if record.ToolName != "" {
+			return record.ToolName
+		}
+	}
+	oldest := newestFirst[len(newestFirst)-1]
+	return oldest.EventType + " " + oldest.Action
 }

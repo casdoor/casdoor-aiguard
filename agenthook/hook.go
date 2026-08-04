@@ -45,38 +45,46 @@ type eventRule struct {
 	outcome     string
 	detailField string
 	tool        bool
+	// titleRefresh marks a session/compact boundary event as a point to look
+	// up the agent's own short title for the session (see readLatestAiTitle).
+	// It stays false on tool and prompt events, which fire far too often for
+	// a file read each time, and on SessionStart, which fires before the
+	// agent has generated a title at all.
+	titleRefresh bool
 }
 
 type hookProfile struct {
-	eventField      string
-	sessionField    string
-	promptField     string
-	toolUseField    string
-	toolNameField   string
-	modelField      string
-	durationField   string
-	mcpPrefix       string
-	toolInputField  string
-	toolOutputField string
-	omitFields      map[string]struct{}
-	lengthFields    map[string]struct{}
-	events          map[string]eventRule
+	eventField          string
+	sessionField        string
+	promptField         string
+	toolUseField        string
+	toolNameField       string
+	modelField          string
+	durationField       string
+	transcriptPathField string
+	mcpPrefix           string
+	toolInputField      string
+	toolOutputField     string
+	omitFields          map[string]struct{}
+	lengthFields        map[string]struct{}
+	events              map[string]eventRule
 }
 
 // profiles contains the only data that differs between compatible JSON hook
 // agents. Adding one does not require another package or normalizer.
 var profiles = map[string]hookProfile{
 	"claude-code": {
-		eventField:      "hook_event_name",
-		sessionField:    "session_id",
-		promptField:     "prompt_id",
-		toolUseField:    "tool_use_id",
-		toolNameField:   "tool_name",
-		modelField:      "model",
-		durationField:   "duration_ms",
-		mcpPrefix:       "mcp__",
-		toolInputField:  "tool_input",
-		toolOutputField: "tool_response",
+		eventField:          "hook_event_name",
+		sessionField:        "session_id",
+		promptField:         "prompt_id",
+		toolUseField:        "tool_use_id",
+		toolNameField:       "tool_name",
+		modelField:          "model",
+		durationField:       "duration_ms",
+		transcriptPathField: "transcript_path",
+		mcpPrefix:           "mcp__",
+		toolInputField:      "tool_input",
+		toolOutputField:     "tool_response",
 		omitFields: map[string]struct{}{
 			"transcript_path": {},
 		},
@@ -86,8 +94,8 @@ var profiles = map[string]hookProfile{
 		},
 		events: map[string]eventRule{
 			"SessionStart":       {eventType: "session", action: "start"},
-			"SessionEnd":         {eventType: "session", action: "end"},
-			"Stop":               {eventType: "session", action: "stop", outcome: "success"},
+			"SessionEnd":         {eventType: "session", action: "end", titleRefresh: true},
+			"Stop":               {eventType: "session", action: "stop", outcome: "success", titleRefresh: true},
 			"StopFailure":        {eventType: "session", action: "stop", outcome: "failure", detailField: "error"},
 			"UserPromptSubmit":   {eventType: "prompt", action: "submitted", outcome: "attempted"},
 			"PreToolUse":         {eventType: "tool", action: "call", outcome: "attempted", tool: true},
@@ -97,8 +105,8 @@ var profiles = map[string]hookProfile{
 			"PermissionDenied":   {eventType: "permission", action: "denied", outcome: "denied", detailField: "reason"},
 			"SubagentStart":      {eventType: "subagent", action: "start"},
 			"SubagentStop":       {eventType: "subagent", action: "stop", outcome: "success"},
-			"PreCompact":         {eventType: "compact", action: "before", outcome: "attempted"},
-			"PostCompact":        {eventType: "compact", action: "after", outcome: "success"},
+			"PreCompact":         {eventType: "compact", action: "before", outcome: "attempted", titleRefresh: true},
+			"PostCompact":        {eventType: "compact", action: "after", outcome: "success", titleRefresh: true},
 		},
 	},
 }
@@ -185,6 +193,11 @@ func Normalize(agentId string, event map[string]any, agentPath string, now time.
 	}
 	if rule.detailField != "" {
 		record.Detail = auditutil.SanitizeString(stringValue(event[rule.detailField]))
+	}
+	if rule.titleRefresh && profile.transcriptPathField != "" {
+		if path := stringValue(event[profile.transcriptPathField]); path != "" {
+			record.Title = readLatestAiTitle(path, record.SessionKey)
+		}
 	}
 	if server, tool, isMcp := auditutil.ParseMcpTool(record.ToolName, profile.mcpPrefix); isMcp {
 		record.McpServer = server
