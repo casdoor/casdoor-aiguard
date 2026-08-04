@@ -43,3 +43,7 @@ commentsRouter*.go
 
 data/patches
 policyset_state.json
+
+# Python bytecode from the embedded Hermes observer plugin
+__pycache__/
+*.pyc

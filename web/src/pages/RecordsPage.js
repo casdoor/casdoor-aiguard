@@ -329,7 +329,7 @@ export default function RecordsPage() {
             style={{width: 160}}
             options={[
               {value: "", label: "All categories"},
-              ...["session", "prompt", "tool", "mcp", "permission", "subagent", "compact"]
+              ...["session", "prompt", "llm", "tool", "mcp", "permission", "subagent", "compact"]
                 .map((value) => ({value, label: value})),
             ]}
           />

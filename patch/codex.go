@@ -36,6 +36,15 @@ func (p codexRolloutPatcher) Status(target Target) (Status, error) {
 	return Status{Patched: patched, Detail: detail}, nil
 }
 
+// PatchNotice spells out that this patch is AIGuard-side bookkeeping, since
+// "Patch" everywhere else in the table means aiguard edits the agent's files.
+func (p codexRolloutPatcher) PatchNotice(patched bool) (string, string) {
+	if patched {
+		return "Stops AIGuard rollout monitoring. Codex files and configuration stay unchanged.", ""
+	}
+	return "Enables audit-only rollout monitoring inside AIGuard. No Codex config, OTel or hooks are installed.", ""
+}
+
 func (p codexRolloutPatcher) Patch(target Target) error {
 	codexHome, err := agentmonitor.ResolveCodexHome(target.Path, target.Owner)
 	if err != nil {

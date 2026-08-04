@@ -18,7 +18,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/casdoor/casdoor-aiguard/conf"
 	"github.com/casdoor/casdoor-aiguard/internal/hermes"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -34,7 +32,6 @@ const (
 	hermesPluginVersion    = "1.0.0"
 	hermesConfigSchema     = 1
 	minHermesPluginVersion = "0.19.0"
-	maxHermesPluginAPISize = 2 * 1024 * 1024
 )
 
 //go:embed hermes_observer.py
@@ -107,15 +104,7 @@ func (p hermesPatcher) Patch(target Target) error {
 		{"aiguard.json", observerConfig, 0o600},
 	}
 
-	return Apply(target, func(changes *ChangeSet) error {
-		config, err := changes.ReadFile(layout.configPath)
-		if err != nil {
-			return err
-		}
-		updatedConfig, err := enableHermesPlugin(config)
-		if err != nil {
-			return fmt.Errorf("update %s: %w", layout.configPath, err)
-		}
+	if err := Apply(target, func(changes *ChangeSet) error {
 		if err := changes.MkdirAll(layout.pluginDir); err != nil {
 			return err
 		}
@@ -136,17 +125,47 @@ func (p hermesPatcher) Patch(target Target) error {
 				return err
 			}
 		}
-		if err := changes.WriteFile(layout.configPath, updatedConfig, 0o600); err != nil {
-			return err
-		}
-		return changes.chownCreated(layout.configPath, ownership)
-	})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// config.yaml stays out of the backup journal on purpose. It is the user's
+	// own file and keeps changing for as long as the patch is on, so Unpatch
+	// deletes the one list entry aiguard added instead of restoring a whole
+	// file snapshot taken at Patch time. Only the installed plugin, which is
+	// entirely aiguard's, is journalled - and that is what undoes this if
+	// enabling the plugin fails.
+	if err := writeHermesPluginMembership(layout.configPath, true, ownership); err != nil {
+		_ = Revert(target)
+		return err
+	}
+	return nil
 }
 
-func (hermesPatcher) Unpatch(target Target) error {
-	// Revert uses the saved paths and does not need the current launcher or
-	// plugin API to remain valid.
+func (p hermesPatcher) Unpatch(target Target) error {
+	// Revert works from the saved paths and does not need the current launcher
+	// to still be valid, so the layout is needed only to reach config.yaml. A
+	// host whose home directory no longer resolves still gets its plugin
+	// removed; the entry left in config.yaml then names a plugin that is gone,
+	// which Hermes ignores.
+	if layout, err := p.layoutOf(target); err == nil {
+		if err := writeHermesPluginMembership(layout.configPath, false, fileOwnership{}); err != nil {
+			return err
+		}
+	}
 	return Revert(target)
+}
+
+// PatchNotice is the copy the agents table shows before and after the button,
+// so the Web UI does not need a branch of its own for how Hermes loads plugins.
+func (hermesPatcher) PatchNotice(patched bool) (string, string) {
+	if patched {
+		return "Removes the metadata-only observer from the default Hermes profile and drops its entry from plugins.enabled. Nothing else in config.yaml changes.",
+			"Restart running Hermes processes to unload it."
+	}
+	return "Installs a metadata-only observer in the default Hermes profile and adds it to plugins.enabled. Named profiles are left alone.",
+		"Restart running Hermes processes to load it."
 }
 
 func (p hermesPatcher) Status(target Target) (Status, error) {
@@ -214,14 +233,16 @@ func (p hermesPatcher) validateTarget(target Target) (hermesLayout, error) {
 	if err != nil {
 		return hermesLayout{}, err
 	}
+	// The version gate is the compatibility check. InspectLauncher has already
+	// confirmed the launcher belongs to a real hermes-agent project, and every
+	// release from here on exposes the observer hooks the plugin registers;
+	// a hook Hermes does not know simply never fires, which the fail-open
+	// observer is built for.
 	if !hermes.VersionAtLeast(project.Version, minHermesPluginVersion) {
 		return hermesLayout{}, fmt.Errorf(
 			"Hermes Agent %s is incompatible; upgrade to %s or later",
 			project.Version, minHermesPluginVersion,
 		)
-	}
-	if err := validateHermesPluginAPI(project.Root); err != nil {
-		return hermesLayout{}, err
 	}
 	return layout, nil
 }
@@ -248,42 +269,6 @@ func (hermesPatcher) layoutOf(target Target) (hermesLayout, error) {
 		configPath: filepath.Join(hermesHome, "config.yaml"),
 		pluginDir:  filepath.Join(hermesHome, "plugins", hermesPluginName),
 	}, nil
-}
-
-func validateHermesPluginAPI(root string) error {
-	hooks, err := hermesManifestHooks()
-	if err != nil {
-		return err
-	}
-	apiPath := filepath.Join(root, "hermes_cli", "plugins.py")
-	info, err := os.Stat(apiPath)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxHermesPluginAPISize {
-		return fmt.Errorf("cannot validate Hermes plugin API at %s", apiPath)
-	}
-	api, err := os.ReadFile(apiPath)
-	if err != nil {
-		return err
-	}
-	for _, hook := range hooks {
-		if !bytes.Contains(api, []byte(`"`+hook+`"`)) &&
-			!bytes.Contains(api, []byte(`'`+hook+`'`)) {
-			return fmt.Errorf("Hermes does not expose required hook %q; upgrade Hermes before patching", hook)
-		}
-	}
-	return nil
-}
-
-func hermesManifestHooks() ([]string, error) {
-	var manifest struct {
-		Hooks []string `yaml:"hooks"`
-	}
-	if err := yaml.Unmarshal(hermesPluginManifest, &manifest); err != nil {
-		return nil, fmt.Errorf("parse embedded Hermes plugin manifest: %w", err)
-	}
-	if len(manifest.Hooks) == 0 {
-		return nil, errors.New("embedded Hermes plugin manifest has no hooks")
-	}
-	return manifest.Hooks, nil
 }
 
 func renderHermesObserverConfig(target Target) ([]byte, error) {
@@ -314,161 +299,4 @@ func hermesPluginOwned(pluginDir string) (bool, error) {
 	}
 	return config.Owner == "casdoor-aiguard" &&
 		config.SchemaVersion == hermesConfigSchema, nil
-}
-
-func enableHermesPlugin(data []byte) ([]byte, error) {
-	document, root, err := parseYAMLMapping(data)
-	if err != nil {
-		return nil, err
-	}
-	plugins, err := ensureMapping(root, "plugins")
-	if err != nil {
-		return nil, err
-	}
-	enabled, err := ensureStringSequence(plugins, "enabled")
-	if err != nil {
-		return nil, err
-	}
-	disabled, err := ensureStringSequence(plugins, "disabled")
-	if err != nil {
-		return nil, err
-	}
-	setSequenceMember(enabled, hermesPluginName, true)
-	setSequenceMember(disabled, hermesPluginName, false)
-	return encodeYAML(document)
-}
-
-func hermesPluginMembership(configPath string) (bool, bool, error) {
-	data, err := os.ReadFile(configPath)
-	if os.IsNotExist(err) {
-		return false, false, nil
-	}
-	if err != nil {
-		return false, false, err
-	}
-	_, root, err := parseYAMLMapping(data)
-	if err != nil {
-		return false, false, err
-	}
-	plugins, ok := mappingValue(root, "plugins")
-	if !ok {
-		return false, false, nil
-	}
-	if plugins.Kind != yaml.MappingNode {
-		return false, false, errors.New("plugins must be a mapping")
-	}
-	enabled, enabledOK := mappingValue(plugins, "enabled")
-	if enabledOK && enabled.Kind != yaml.SequenceNode {
-		return false, false, errors.New("plugins.enabled must be a sequence")
-	}
-	disabled, disabledOK := mappingValue(plugins, "disabled")
-	if disabledOK && disabled.Kind != yaml.SequenceNode {
-		return false, false, errors.New("plugins.disabled must be a sequence")
-	}
-	return enabledOK && sequenceContains(enabled, hermesPluginName),
-		disabledOK && sequenceContains(disabled, hermesPluginName), nil
-}
-
-func parseYAMLMapping(data []byte) (*yaml.Node, *yaml.Node, error) {
-	if len(bytes.TrimSpace(data)) == 0 {
-		root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		return &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}, root, nil
-	}
-	var document yaml.Node
-	if err := yaml.Unmarshal(data, &document); err != nil {
-		return nil, nil, err
-	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return nil, nil, errors.New("config root must be a mapping")
-	}
-	return &document, document.Content[0], nil
-}
-
-func encodeYAML(document *yaml.Node) ([]byte, error) {
-	var buffer bytes.Buffer
-	encoder := yaml.NewEncoder(&buffer)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(document); err != nil {
-		return nil, err
-	}
-	if err := encoder.Close(); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
-}
-
-func mappingValue(mapping *yaml.Node, key string) (*yaml.Node, bool) {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return nil, false
-	}
-	for index := 0; index+1 < len(mapping.Content); index += 2 {
-		if mapping.Content[index].Value == key {
-			return mapping.Content[index+1], true
-		}
-	}
-	return nil, false
-}
-
-func ensureMapping(parent *yaml.Node, key string) (*yaml.Node, error) {
-	if value, ok := mappingValue(parent, key); ok {
-		if value.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("%s must be a mapping", key)
-		}
-		return value, nil
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	value := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	parent.Content = append(parent.Content, keyNode, value)
-	return value, nil
-}
-
-func ensureStringSequence(parent *yaml.Node, key string) (*yaml.Node, error) {
-	if value, ok := mappingValue(parent, key); ok {
-		if value.Kind != yaml.SequenceNode {
-			return nil, fmt.Errorf("%s must be a sequence", key)
-		}
-		for _, item := range value.Content {
-			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
-				return nil, fmt.Errorf("%s must contain only strings", key)
-			}
-		}
-		return value, nil
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	value := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	parent.Content = append(parent.Content, keyNode, value)
-	return value, nil
-}
-
-func sequenceContains(sequence *yaml.Node, value string) bool {
-	if sequence == nil || sequence.Kind != yaml.SequenceNode {
-		return false
-	}
-	for _, item := range sequence.Content {
-		if item.Kind == yaml.ScalarNode && item.Value == value {
-			return true
-		}
-	}
-	return false
-}
-
-func setSequenceMember(sequence *yaml.Node, value string, wanted bool) {
-	filtered := sequence.Content[:0]
-	found := false
-	for _, item := range sequence.Content {
-		if item.Kind == yaml.ScalarNode && item.Value == value {
-			if wanted && !found {
-				filtered = append(filtered, item)
-				found = true
-			}
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	if wanted && !found {
-		filtered = append(filtered, &yaml.Node{
-			Kind: yaml.ScalarNode, Tag: "!!str", Value: value,
-		})
-	}
-	sequence.Content = filtered
 }

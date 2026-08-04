@@ -74,19 +74,13 @@ def _integer(value: Any) -> int | None:
 
 
 def _duration_ms(value: Any, *, seconds: bool = False) -> int:
-    number = _integer(value)
-    if number is None:
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            return 0
-        number = int(numeric)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
     if seconds:
-        try:
-            return max(0, int(float(value) * 1000))
-        except (TypeError, ValueError):
-            return 0
-    return max(0, number)
+        number *= 1000
+    return max(0, int(number))
 
 
 def _length(value: Any) -> int:
@@ -253,10 +247,29 @@ def _on_post_api_request(**values: Any) -> None:
     _enqueue(record)
 
 
+def _error_identity(values: dict[str, Any]) -> tuple[str, Any]:
+    """Split Hermes' error report into a type name and the message itself.
+
+    ``api_request_error`` reports a structured ``error = {"type", "message"}``;
+    the tool hooks report flat ``error_type`` / ``error_message`` instead. Only
+    the type name and the message's length ever leave this module.
+    """
+    error = values.get("error")
+    error_type = _text(values.get("error_type"))
+    message = values.get("error_message")
+    if isinstance(error, dict):
+        error_type = error_type or _text(error.get("type"))
+        if message is None:
+            message = error.get("message")
+    elif message is None and error is not None:
+        message = error
+    if not error_type and message is not None:
+        error_type = type(message).__name__
+    return error_type, message
+
+
 def _on_api_request_error(**values: Any) -> None:
-    error_message = values.get("error_message")
-    if error_message is None:
-        error_message = values.get("error")
+    error_type, error_message = _error_identity(values)
     data = _metadata(
         provider=_text(values.get("provider")),
         apiMode=_text(values.get("api_mode")),
@@ -266,8 +279,8 @@ def _on_api_request_error(**values: Any) -> None:
         retryable=values.get("retryable") if isinstance(values.get("retryable"), bool) else None,
         statusCode=_integer(values.get("status_code")),
         reason=_text(values.get("reason")),
-        errorType=_text(values.get("error_type") or type(error_message).__name__),
-        errorMessageLength=_length(error_message),
+        errorType=error_type,
+        errorMessageLength=_length(error_message) if error_message is not None else None,
     )
     record = _base_record("llm", "error", "failure", values, data)
     if values.get("api_duration") is not None:
@@ -279,13 +292,12 @@ def _tool_record(action: str, outcome: str, values: dict[str, Any]) -> dict[str,
     tool_name = _text(values.get("tool_name"))
     server, tool = _mcp_identity(tool_name)
     event_type = "mcp" if server else "tool"
+    error_type, error_message = _error_identity(values)
     data = _metadata(
         taskId=_text(values.get("task_id")),
         turnId=_text(values.get("turn_id")),
-        errorType=_text(values.get("error_type")),
-        errorMessageLength=_length(values.get("error_message"))
-        if values.get("error_message") is not None
-        else None,
+        errorType=error_type,
+        errorMessageLength=_length(error_message) if error_message is not None else None,
         middlewareStageCount=_count(values.get("middleware_trace")),
     )
     record = _base_record(event_type, action, outcome, values, data)
@@ -369,7 +381,9 @@ def _on_subagent_stop(**values: Any) -> None:
         summaryLength=_length(values.get("child_summary")),
         toolCallCount=_count(values.get("tool_call_history")),
     )
-    record = _base_record("subagent", "end", outcome, normalized, data)
+    # "stop", not "end": the rest of aiguard's record vocabulary already spells
+    # the end of a subagent that way (see agenthook's SubagentStop).
+    record = _base_record("subagent", "stop", outcome, normalized, data)
     duration = values.get("duration_ms")
     if duration is None and values.get("duration") is not None:
         record["durationMs"] = _duration_ms(values.get("duration"), seconds=True)

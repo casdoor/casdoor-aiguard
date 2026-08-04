@@ -22,7 +22,6 @@ import {AgentIcon} from "./policySetUtil";
 const {Title, Text} = Typography;
 
 const rowKey = (record) => `${record.owner}:${record.path}`;
-const isCodexRollout = (record) => record.agentId === "codex" || record.agentId === "codex-cli";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
@@ -44,14 +43,15 @@ export default function AgentsPage() {
 
   const togglePatch = (record) => {
     const patched = record.patched;
-    const isHermes = record.agentId === "hermes-agent";
     const target = {agentId: record.agentId, path: record.path, owner: record.owner};
 
     setBusyKey(rowKey(record));
     (patched ? unpatchAgent(target) : patchAgent(target))
       .then(() => {
+        // What the patch did, and what is still left for the user to do, are
+        // the patcher's words: this page never branches on which agent it is.
         const success = patched ? `Unpatched ${record.name}` : `Patched ${record.name}`;
-        message.success(isHermes ? `${success}. Restart running Hermes processes to apply the change.` : success);
+        message.success(record.followup ? `${success}. ${record.followup}` : success);
         load();
       })
       .catch((err) => message.error(err.message))
@@ -76,18 +76,7 @@ export default function AgentsPage() {
         {record.patched ? "Unpatch" : "Patch"}
       </Button>
     );
-    const isHermes = record.agentId === "hermes-agent";
-    const description = isHermes
-      ? (record.patched
-        ? "Removes the metadata-only observer from the default profile. Running Hermes processes keep it loaded until restarted."
-        : "Installs a metadata-only observer in the default profile. Restart an already-running Hermes process to begin recording.")
-      : isCodexRollout(record)
-        ? (record.patched
-          ? "Stops AIGuard rollout monitoring. Codex files and configuration stay unchanged."
-          : "Enables audit-only rollout monitoring inside AIGuard. No Codex config, OTel or hooks are installed.")
-      : (record.patched
-        ? "Removes aiguard's hooks and restores every file the patch changed."
-        : "Installs aiguard's hooks so this agent streams its behaviour to Records.");
+    const description = [record.notice, record.followup].filter(Boolean).join(" ");
     return (
       <Popconfirm
         title={record.patched ? `Unpatch ${record.name}?` : `Patch ${record.name}?`}

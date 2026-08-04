@@ -3,7 +3,9 @@ version: "1.0.0"
 description: "Metadata-only behaviour audit for Casdoor AIGuard."
 author: Casdoor
 kind: standalone
-hooks:
+# "provides_hooks" is the key Hermes' manifest parser reads; the callbacks
+# themselves are registered from register() in __init__.py.
+provides_hooks:
   - pre_api_request
   - post_api_request
   - api_request_error

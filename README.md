@@ -79,7 +79,7 @@ agent, and one record on the Records page.
   │               Windows Desktop also tails Cowork audit.jsonl files      │
   │               shared settings are edited without replacing user data   │
   │  audit integrations POST /api/records; enforcement integrations use    │
-  │  POST /api/enforce  →  allow / deny  →  the agent obeys                 │
+  │  POST /api/enforce  →  allow / deny  →  the agent obeys                │
   └────────────────────────────────────────────────────────────────────────┘
 
   ┌─ path 2: egress interception (Linux, transparent) ─────────────────────┐
@@ -182,8 +182,10 @@ launcher layouts on Linux, macOS and Windows. Patch installs
 `casdoor-aiguard-observer` under the default Hermes profile, enables it in
 `config.yaml`, and leaves named profiles untouched. A running Hermes process
 loads plugins only at startup, so it must be restarted after Patch or Unpatch;
-aiguard never restarts it automatically. Unpatch restores the pre-Patch
-`config.yaml` snapshot, so profile changes made while patched are not retained.
+aiguard never restarts it automatically. `config.yaml` is edited a line at a
+time rather than re-serialized, and Unpatch deletes only the one
+`plugins.enabled` entry Patch added, so comments, formatting and every profile
+change made while patched survive both.
 
 The observer uses Hermes' API, tool, session and subagent lifecycle hooks.
 LLM records contain provider/model, counts, token usage, status and duration;

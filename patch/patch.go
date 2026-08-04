@@ -58,6 +58,12 @@ type Status struct {
 	Supported bool   `json:"supported"`
 	Patched   bool   `json:"patched"`
 	Detail    string `json:"detail,omitempty"`
+	// Notice describes what pressing the button will do next - install when
+	// the target is unpatched, remove when it is patched - and Followup what
+	// the user must still do for that to take effect. StatusOf fills both, so
+	// no caller has to know which agent it is looking at.
+	Notice   string `json:"notice,omitempty"`
+	Followup string `json:"followup,omitempty"`
 }
 
 // Patcher instruments one kind of agent. Implementations must be idempotent:
@@ -76,6 +82,16 @@ type Patcher interface {
 	// Unpatch removes everything Patch installed. Patchers that edit shared,
 	// mergeable settings must preserve unrelated changes made later.
 	Unpatch(target Target) error
+}
+
+// patchNoticer is the optional half of Patcher that supplies the agent's own
+// wording for the confirmation prompt and the message that follows. Only an
+// agent whose patch works unlike the rest - a monitor that edits nothing, a
+// plugin that loads at startup and needs a restart - has to implement it; the
+// generic text below covers everyone else. It exists so the Web UI never has
+// to branch on an agent id to explain what a button does.
+type patchNoticer interface {
+	PatchNotice(patched bool) (notice string, followup string)
 }
 
 var patchers = map[string]Patcher{}
@@ -108,10 +124,23 @@ func StatusOf(target Target) Status {
 	}
 	status, err := patcher.Status(target)
 	if err != nil {
-		return Status{Supported: patcher.Supported(), Detail: err.Error()}
+		status = Status{Detail: err.Error()}
 	}
 	status.Supported = patcher.Supported()
+	if status.Supported {
+		status.Notice, status.Followup = patchNoticeOf(patcher, status.Patched)
+	}
 	return status
+}
+
+func patchNoticeOf(patcher Patcher, patched bool) (string, string) {
+	if source, ok := patcher.(patchNoticer); ok {
+		return source.PatchNotice(patched)
+	}
+	if patched {
+		return "Removes aiguard's hooks and restores every file the patch changed.", ""
+	}
+	return "Installs aiguard's hooks so this agent streams its behaviour to Records.", ""
 }
 
 // Patch instruments the target so it reports its behaviour to aiguard.
