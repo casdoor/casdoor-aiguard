@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 )
 
 // homeDir is one user's home directory and the account that owns it.
@@ -89,4 +91,19 @@ func fileOwner(path string) string {
 		return id
 	}
 	return account.Username
+}
+
+func scanHermesUnix(home homeDir, launcher string, roots ...string) []Installation {
+	info, err := os.Stat(launcher)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return nil
+	}
+	if len(roots) == 0 {
+		roots = []string{filepath.Join(home.path, ".hermes", hermes.ProjectDir)}
+		if currentHome, homeErr := os.UserHomeDir(); homeErr == nil &&
+			sameHermesPath(currentHome, home.path) && os.Getenv("HERMES_HOME") != "" {
+			roots = []string{filepath.Join(os.Getenv("HERMES_HOME"), hermes.ProjectDir)}
+		}
+	}
+	return hermesInstallation(launcher, home.owner, roots...)
 }

@@ -28,6 +28,7 @@ export const AGENT_ORDER = [
   "OpenClaw",
   "Codex",
   "Codex CLI",
+  "Hermes Agent",
   "Cursor",
   "GitHub Copilot",
   "opencode",
@@ -51,6 +52,7 @@ export const AGENT_SITES = {
   "OpenClaw": "openclaw.ai",
   "Codex": "openai.com",
   "Codex CLI": "openai.com",
+  "Hermes Agent": "hermes-agent.nousresearch.com",
   "Cursor": "cursor.com",
   // Cursor's CLI has no policy set of its own yet, but the agent scan finds it
   // and an installation still deserves the brand mark of the agent it is.

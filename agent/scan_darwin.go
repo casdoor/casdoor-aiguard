@@ -20,6 +20,8 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+
+	"github.com/casdoor/casdoor-aiguard/internal/hermes"
 )
 
 // Scan finds installations of every known agent in known macOS layouts. It
@@ -41,6 +43,10 @@ func Scan() []Installation {
 		stampAgentId(installations, mark, fingerprint.ID)
 		fillMissingVersions(installations, mark, fingerprint)
 	}
+	for _, home := range homes {
+		installations = append(installations, scanHermesUnix(home, filepath.Join(home.path, ".local", "bin", hermes.ExecName))...)
+	}
+	installations = append(installations, scanHermesOnPath()...)
 	installations = append(installations, scanCodexStandalone()...)
 	installations = append(installations, scanCodexDarwinApps(homes)...)
 	// Last, so that an agent found both on disk and by its port keeps the

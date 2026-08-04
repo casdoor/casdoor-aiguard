@@ -75,10 +75,11 @@ agent, and one record on the Records page.
   │                 • OpenClaw       → a hook in its hook directory        │
   │                 • Claude Desktop → aiguard registered as an MCP server │
   │                 • Claude Code    → command hooks in shared settings    │
+  │                 • Hermes Agent   → a metadata-only user plugin         │
   │               Windows Desktop also tails Cowork audit.jsonl files      │
   │               shared settings are edited without replacing user data   │
-  │  the patched agent then posts each operation to aiguard before doing   │
-  │  it:  POST /api/enforce  →  allow / deny  →  the agent obeys           │
+  │  audit integrations POST /api/records; enforcement integrations use    │
+  │  POST /api/enforce  →  allow / deny  →  the agent obeys                 │
   └────────────────────────────────────────────────────────────────────────┘
 
   ┌─ path 2: egress interception (Linux, transparent) ─────────────────────┐
@@ -146,6 +147,7 @@ patcher (`patch/`):
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
 | **Claude Desktop** | MCP server registration; on Windows, Cowork `audit.jsonl` plus the shared Claude Code hooks | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
+| **Hermes Agent** | metadata-only observer plugin in the default Hermes profile | supported (audit only) |
 | **ChatGPT Desktop (Codex)** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS) |
 | **Codex CLI** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS/Linux) |
 | Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
@@ -172,6 +174,24 @@ Project `.claude/settings.json` and `settings.local.json` files are outside the
 current user-level patch scope. Hook payloads have recognizable credentials
 redacted and are capped at 64 KiB; reads and writes of credential files hide
 the file contents while retaining the operation metadata the audit trail needs.
+
+### Hermes Agent observer
+
+Hermes Agent is discovered from its verified Python project and official
+launcher layouts on Linux, macOS and Windows. Patch installs
+`casdoor-aiguard-observer` under the default Hermes profile, enables it in
+`config.yaml`, and leaves named profiles untouched. A running Hermes process
+loads plugins only at startup, so it must be restarted after Patch or Unpatch;
+aiguard never restarts it automatically. Unpatch restores the pre-Patch
+`config.yaml` snapshot, so profile changes made while patched are not retained.
+
+The observer uses Hermes' API, tool, session and subagent lifecycle hooks.
+LLM records contain provider/model, counts, token usage, status and duration;
+tool and MCP records contain names, correlation IDs, status and duration.
+Prompts, responses, reasoning, tool arguments/results, error text and subagent
+goal/summary text are never serialized. Delivery is asynchronous, bounded and
+fail-open: an unavailable aiguard or a full queue can lose audit records but
+cannot delay or change the agent's operation.
 
 ### Claude Desktop Cowork on Windows
 

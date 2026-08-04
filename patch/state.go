@@ -143,6 +143,32 @@ func (c *ChangeSet) WriteFile(path string, data []byte, perm os.FileMode) error 
 	return nil
 }
 
+// chownCreated applies ownership only when this ChangeSet created path.
+// Existing files are written in place, preserving their owner and ACL.
+func (c *ChangeSet) chownCreated(path string, ownership fileOwnership) error {
+	for index := len(c.manifest.Changes) - 1; index >= 0; index-- {
+		item := c.manifest.Changes[index]
+		if item.Path != path {
+			continue
+		}
+		if item.Kind == changeDir || item.Kind == changeFile && item.Backup == "" {
+			return applyFileOwnership(path, ownership)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (c *ChangeSet) chmodCreated(path string, mode os.FileMode) error {
+	for index := len(c.manifest.Changes) - 1; index >= 0; index-- {
+		item := c.manifest.Changes[index]
+		if item.Path == path && item.Kind == changeDir {
+			return os.Chmod(path, mode)
+		}
+	}
+	return nil
+}
+
 // ReadFile reads a file the patch is about to modify, reporting a missing file
 // as empty content. Patchers use it to merge into an existing config rather than
 // clobber it.
@@ -176,7 +202,16 @@ func Apply(target Target, apply func(*ChangeSet) error) error {
 		rollback(changes.manifest, changes.backupDir)
 		return err
 	}
-	return saveManifest(target, changes.manifest)
+	if err := saveManifest(target, changes.manifest); err != nil {
+		rollbackErr := rollback(changes.manifest, changes.backupDir)
+		_ = os.Remove(manifestPath(target))
+		_ = os.RemoveAll(changes.backupDir)
+		if rollbackErr != nil {
+			return fmt.Errorf("save patch state: %v; rollback failed: %w", err, rollbackErr)
+		}
+		return err
+	}
+	return nil
 }
 
 // Revert undoes the patch recorded for target. An unpatched target is not an
@@ -235,6 +270,9 @@ func rollback(saved *manifest, backups string) error {
 			var content []byte
 			if content, err = os.ReadFile(filepath.Join(backups, item.Backup)); err == nil {
 				err = os.WriteFile(item.Path, content, item.Mode)
+				if err == nil {
+					err = os.Chmod(item.Path, item.Mode)
+				}
 			}
 		}
 		if err != nil && failure == nil {

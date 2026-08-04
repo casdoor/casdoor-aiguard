@@ -128,6 +128,19 @@ var fingerprints = append([]Fingerprint{
 		CmdMarkers:          []string{"openclaw"},
 	},
 	{
+		ID:          "hermes-agent",
+		DisplayName: "Hermes Agent",
+		ExecName:    "hermes",
+		CmdMarkers:  []string{"hermes_cli", "/hermes-agent/hermes", `\hermes-agent\hermes`},
+		ExtraExecRules: []PathRule{
+			{Suffix: "/.local/bin/hermes"},
+			{Exact: "/usr/local/bin/hermes"},
+			{Contains: []string{"/hermes-agent/venv/bin/python"}},
+			{Contains: []string{"/hermes-agent/venv/scripts/python"}},
+			{Contains: []string{"/hermes/hermes-agent/venv/scripts/hermes.exe"}},
+		},
+	},
+	{
 		ID:          "cursor",
 		DisplayName: "Cursor",
 		ExecName:    "Cursor",
