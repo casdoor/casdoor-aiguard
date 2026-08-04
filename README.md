@@ -44,6 +44,7 @@ below them — and it can undo every change it made.
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
 - [Agents](#agents)
+- [Sessions](#sessions)
 - [Records](#records)
 - [Policy Hub](#policy-hub)
 - [Digital Employee, Self-Learning and Policy Fusion](#digital-employee-self-learning-and-policy-fusion)
@@ -168,9 +169,9 @@ installed command and arguments against the current aiguard process and reports
 when Patch must refresh them.
 
 Project `.claude/settings.json` and `settings.local.json` files are outside the
-current user-level patch scope. Hook payloads are recursively redacted and
-capped at 64 KiB; sensitive reads and writes hide file contents while retaining
-the operation metadata needed by the audit trail.
+current user-level patch scope. Hook payloads have recognizable credentials
+redacted and are capped at 64 KiB; reads and writes of credential files hide
+the file contents while retaining the operation metadata the audit trail needs.
 
 ### Claude Desktop Cowork on Windows
 
@@ -181,12 +182,12 @@ restart do not import history; new activity is polled about once per second.
 Status distinguishes a missing audit directory, an empty directory, a read
 error and an active monitor.
 
-Cowork text creates prompt/response records containing only the Unicode
-character count. Tool and MCP calls create an `attempted` record followed by a
-matching `success` or `failure`; inputs are redacted and bounded, and result
-bodies, message text and thinking are not stored. This is post-execution audit
-and cannot block a call. Independent Desktop Chat, cloud sessions, SSH and
-remote WSL activity are outside this local log and hook integration.
+Cowork text creates prompt/response records carrying the Unicode character
+count. Tool and MCP calls create an `attempted` record followed by a matching
+`success` or `failure`, with inputs redacted for credentials and bounded in
+size. This is post-execution audit and cannot block a call. Independent Desktop
+Chat, cloud sessions, SSH and remote WSL activity are outside this local log and
+hook integration.
 
 ### ChatGPT Desktop Codex and Codex CLI rollouts
 
@@ -202,9 +203,21 @@ runs started with `--ephemeral` do not write rollout files and cannot be
 audited by this integration.
 
 Records contain interaction lengths, available token counts, and Tool/MCP
-identity, result and duration. Prompt/response text, reasoning, tool arguments
-and output are not stored. Rollout monitoring is post-execution audit only and
-cannot block a call or report individual HTTP retries.
+identity, result and duration. Rollout monitoring is post-execution audit only
+and cannot block a call or report individual HTTP retries.
+
+## Sessions
+
+The Sessions page groups records by `sessionKey` - one row per agent run - so
+you can find a session instead of scrolling a flat record log. Click a session
+to open its records, filtered.
+
+Where an agent reports one, the title shown is the agent's own short label for
+the session - for Claude Code, the same title `claude --resume` would show,
+read from the `ai-title` entry its transcript already carries. It is read on
+session and compact boundary events, so it costs one bounded tail read per
+boundary rather than one per tool call. A session no agent titled falls back
+to a guess - the first tool it called, or its first event otherwise.
 
 ## Records
 
@@ -216,10 +229,9 @@ allowed, and the one-line reason a block happened.
 
 Claude Code and Cowork records are audit-only: they do not call Casbin, block
 execution, or populate `Resource`, `Intent` or `PolicySet`, so the UI shows
-them as **logged** and does not offer feedback learning. Hook payloads are
-recursively redacted and capped at 64 KiB before leaving the hook process.
-Transcript paths, assistant response text and compaction summaries are not
-stored.
+them as **logged** and does not offer feedback learning. Hook payloads have
+recognizable credentials redacted and are capped at 64 KiB before leaving the
+hook process.
 
 ![Records](docs/images/records.png)
 
@@ -416,8 +428,9 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/auth-config` · `POST /api/signin` · `POST /api/signout` · `GET /api/account` | optional Casdoor operator login |
 | `GET /api/agents` | AI agents installed on this host, with patch status |
 | `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
-| `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`; ingest one hook record) |
+| `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`, `session`; ingest one hook record) |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
+| `GET /api/sessions` | records grouped by session, one summary row each, newest first |
 | `POST /api/enforce` | rule on one agent operation and record it |
 | `GET /api/events` | most recent intercepted egress events, newest first |
 | `GET /api/policy-sets` · `GET /api/policy-set` · `POST /api/policy-set/enable` | Policy Hub |

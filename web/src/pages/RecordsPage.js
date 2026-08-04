@@ -120,6 +120,7 @@ function RecordDetail({record}) {
       {record.user && <Descriptions.Item label="User">{record.user}</Descriptions.Item>}
       {record.channel && <Descriptions.Item label="Channel">{record.channel}</Descriptions.Item>}
       {record.sessionKey && <Descriptions.Item label="Session">{record.sessionKey}</Descriptions.Item>}
+      {record.title && <Descriptions.Item label="Session title">{record.title}</Descriptions.Item>}
       {record.promptId && <Descriptions.Item label="Prompt ID"><Text code>{record.promptId}</Text></Descriptions.Item>}
       {record.toolUseId && <Descriptions.Item label="Tool use ID"><Text code>{record.toolUseId}</Text></Descriptions.Item>}
       {record.toolName && <Descriptions.Item label="Tool"><Text code>{record.toolName}</Text></Descriptions.Item>}
@@ -156,6 +157,7 @@ export default function RecordsPage() {
   const agent = search.get("agent") || "";
   const eventType = search.get("eventType") || "";
   const outcome = search.get("outcome") || "";
+  const session = search.get("session") || "";
 
   const [records, setRecords] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -168,13 +170,13 @@ export default function RecordsPage() {
   }, []);
 
   const load = useCallback(() => {
-    getRecords(agent, 200, eventType, outcome)
+    getRecords(agent, 200, eventType, outcome, session)
       .then((data) => {
         setRecords(data || []);
         setError(null);
       })
       .catch((err) => setError(err.message));
-  }, [agent, eventType, outcome]);
+  }, [agent, eventType, outcome, session]);
 
   useEffect(() => {
     load();
@@ -251,7 +253,13 @@ export default function RecordsPage() {
         </Space>
       ),
     },
-    {title: "Session", dataIndex: "sessionKey", key: "sessionKey", ellipsis: true},
+    {
+      title: "Session",
+      dataIndex: "sessionKey",
+      key: "sessionKey",
+      ellipsis: true,
+      render: (value) => (value ? <Link to={`/records?session=${encodeURIComponent(value)}`}>{value}</Link> : null),
+    },
     {
       title: "Triggered",
       dataIndex: "isTriggered",
@@ -301,6 +309,11 @@ export default function RecordsPage() {
       <Space style={{display: "flex", justifyContent: "space-between", marginBottom: 16}}>
         <Space align="center">
           <Title level={3} style={{margin: 0}}>Records</Title>
+          {session &&
+            <Tag closable onClose={(e) => { e.preventDefault(); setFilter("session", ""); }}>
+              session <Text code>{session}</Text>
+            </Tag>
+          }
           {corrected > 0 &&
             <Link to="/self-learning">
               <Tag color="gold" icon={<BulbOutlined />} style={{cursor: "pointer"}}>
