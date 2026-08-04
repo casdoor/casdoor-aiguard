@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package auditutil contains the privacy boundary shared by agent collectors.
-// Values must be sanitized and bounded here before being sent or persisted.
+// Package auditutil contains the credential-redaction and size boundary shared
+// by agent collectors. What an agent did is worth recording in full; the
+// secrets that happen to pass through it are not, so values are stripped of
+// recognizable credentials and bounded here before being sent or persisted.
 package auditutil
 
 import (
