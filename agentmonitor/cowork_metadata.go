@@ -43,8 +43,8 @@ type coworkMetadataCacheEntry struct {
 	size     int64
 }
 
-// coworkMetadataCache avoids reparsing every sidecar on the one-second Cowork
-// polling interval.
+// coworkMetadataCache avoids reparsing unchanged sidecars on the one-second
+// Cowork polling interval, including files that failed to decode.
 type coworkMetadataCache struct {
 	entries map[string]coworkMetadataCacheEntry
 }
@@ -66,16 +66,14 @@ func (cache *coworkMetadataCache) load(auditPath string) (coworkMetadata, bool, 
 		return cached.metadata, false, nil
 	}
 
+	entry := coworkMetadataCacheEntry{modified: info.ModTime(), size: info.Size()}
 	metadata, err := readCoworkMetadataFile(metadataPath, info.Size())
 	if err != nil {
-		delete(cache.entries, metadataPath)
+		cache.entries[metadataPath] = entry
 		return coworkMetadata{}, false, err
 	}
-	cache.entries[metadataPath] = coworkMetadataCacheEntry{
-		metadata: metadata,
-		modified: info.ModTime(),
-		size:     info.Size(),
-	}
+	entry.metadata = metadata
+	cache.entries[metadataPath] = entry
 	return metadata, true, nil
 }
 

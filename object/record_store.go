@@ -62,7 +62,7 @@ func SetSessionTitle(sessionKey, title string) {
 	if len(title) > maxRecordTitleBytes {
 		const suffix = "..."
 		limit := maxRecordTitleBytes - len(suffix)
-		for !utf8.ValidString(title[:limit]) {
+		for limit > 0 && !utf8.RuneStart(title[limit]) {
 			limit--
 		}
 		title = title[:limit] + suffix

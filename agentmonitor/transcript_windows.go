@@ -30,6 +30,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/auditutil"
 	"github.com/casdoor/casdoor-aiguard/object"
 )
@@ -235,7 +236,7 @@ func (m *transcriptMonitor) poll() {
 		for _, path := range files {
 			metadata, changed, metadataErr := m.metadata.load(path)
 			if metadataErr != nil {
-				m.lastErr = metadataErr
+				logs.Warn("failed to read optional Cowork session metadata: %v", metadataErr)
 			}
 			sessionKey := metadata.sessionKey(path)
 			if changed {
