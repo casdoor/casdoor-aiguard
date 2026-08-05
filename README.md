@@ -207,9 +207,20 @@ error and an active monitor.
 Cowork text creates prompt/response records carrying the Unicode character
 count. Tool and MCP calls create an `attempted` record followed by a matching
 `success` or `failure`, with inputs redacted for credentials and bounded in
-size. This is post-execution audit and cannot block a call. Independent Desktop
-Chat, cloud sessions, SSH and remote WSL activity are outside this local log and
-hook integration.
+size. The Sessions page uses the title Claude Desktop keeps in the adjacent
+`local_<id>.json` metadata file. Records are grouped by its outer Cowork
+`sessionId`, falling back to the adjacent directory UUID; the inner
+`cliSessionId` is never used as the Cowork session identity. Generated titles
+and later renames are picked up without waiting for another audit event. The
+monitor parses only the title and outer session identifier, and keeps the title
+as live in-memory metadata for the Sessions page instead of copying it into
+behaviour records or the append-only record log. The initial message and every
+other conversation field in that file remain untouched and are never stored by
+aiguard.
+
+This is post-execution audit and cannot block a call. Independent Desktop Chat,
+cloud sessions, SSH and remote WSL activity are outside this local log and hook
+integration.
 
 ### ChatGPT Desktop Codex and Codex CLI rollouts
 

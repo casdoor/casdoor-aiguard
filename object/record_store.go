@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/conf"
@@ -34,10 +35,11 @@ import (
 const recordRingCapacity = 5000
 
 type recordStore struct {
-	mutex   sync.RWMutex
-	records []*Record
-	head    int
-	size    int
+	mutex         sync.RWMutex
+	records       []*Record
+	head          int
+	size          int
+	sessionTitles map[string]string
 
 	logFile *os.File
 }
@@ -45,7 +47,45 @@ type recordStore struct {
 var records = newRecordStore()
 
 func newRecordStore() *recordStore {
-	return &recordStore{records: make([]*Record, recordRingCapacity)}
+	return &recordStore{
+		records:       make([]*Record, recordRingCapacity),
+		sessionTitles: map[string]string{},
+	}
+}
+
+// SetSessionTitle updates the live title used by the Sessions page. A title is
+// session metadata rather than a new audited operation, so it is kept as an
+// override instead of rewriting append-only records. An empty title removes
+// the override and restores the normal fallback.
+func SetSessionTitle(sessionKey, title string) {
+	title = strings.TrimSpace(title)
+	if len(title) > maxRecordTitleBytes {
+		const suffix = "..."
+		limit := maxRecordTitleBytes - len(suffix)
+		for limit > 0 && !utf8.RuneStart(title[limit]) {
+			limit--
+		}
+		title = title[:limit] + suffix
+	}
+
+	records.mutex.Lock()
+	defer records.mutex.Unlock()
+	if title == "" {
+		delete(records.sessionTitles, sessionKey)
+		return
+	}
+	records.sessionTitles[sessionKey] = title
+}
+
+func sessionTitlesSnapshot() map[string]string {
+	records.mutex.RLock()
+	defer records.mutex.RUnlock()
+
+	result := make(map[string]string, len(records.sessionTitles))
+	for sessionKey, title := range records.sessionTitles {
+		result[sessionKey] = title
+	}
+	return result
 }
 
 // InitRecordLog opens the record log file for appending. Call once at startup.
@@ -225,9 +265,8 @@ func recordTime(r *Record) time.Time {
 
 // SessionSummary is one row of the Sessions page: everything a session's
 // records have in common, plus what happened during it. Title prefers the
-// real label an agent reports for its own session (see Record.Title) and
-// falls back to a guess - the first tool the session used - for a session no
-// record carried one for, so every row still has something to show.
+// latest live metadata an agent reports, then a label carried by a record,
+// and finally a guess based on the first tool the session used.
 type SessionSummary struct {
 	SessionKey   string `json:"sessionKey"`
 	Agent        string `json:"agent"`
@@ -244,6 +283,7 @@ type SessionSummary struct {
 // and are skipped.
 func ListSessions() []*SessionSummary {
 	all := ListRecordsFiltered(RecordFilter{}, 0) // newest first
+	sessionTitles := sessionTitlesSnapshot()
 
 	order := []string{}
 	groups := map[string][]*Record{}
@@ -270,7 +310,7 @@ func ListSessions() []*SessionSummary {
 		result = append(result, &SessionSummary{
 			SessionKey:   key,
 			Agent:        newest.Agent,
-			Title:        sessionTitle(group),
+			Title:        sessionTitle(group, sessionTitles[key]),
 			RecordCount:  len(group),
 			FirstTime:    oldest.CreatedTime,
 			LastTime:     newest.CreatedTime,
@@ -280,12 +320,13 @@ func ListSessions() []*SessionSummary {
 	return result
 }
 
-// sessionTitle prefers the most recent real title an agent reported for this
-// session (Record.Title), since that is what the agent itself would show for
-// it. Absent one, it stands in with the first tool or MCP target the session
-// touched, oldest record first, and falls back further to the oldest
-// record's own event/action so every session is titled either way.
-func sessionTitle(newestFirst []*Record) string {
+// sessionTitle prefers live session metadata, then the most recent title an
+// agent reported on a record. Absent either, it uses the first tool or MCP
+// target the session touched, then the oldest record's event/action.
+func sessionTitle(newestFirst []*Record, liveTitle string) string {
+	if liveTitle != "" {
+		return liveTitle
+	}
 	for _, record := range newestFirst {
 		if record.Title != "" {
 			return record.Title

@@ -30,6 +30,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/auditutil"
 	"github.com/casdoor/casdoor-aiguard/object"
 )
@@ -87,6 +88,7 @@ type transcriptMonitor struct {
 	roots              map[string]transcriptRoot
 	offsets            map[string]int64
 	pending            map[string]pendingToolCall
+	metadata           coworkMetadataCache
 	stop               chan struct{}
 	done               chan struct{}
 	existingRoots      []string
@@ -105,11 +107,12 @@ type transcriptStatus struct {
 
 func newTranscriptMonitor(targets map[string]monitorTarget) *transcriptMonitor {
 	monitor := &transcriptMonitor{
-		roots:   map[string]transcriptRoot{},
-		offsets: map[string]int64{},
-		pending: map[string]pendingToolCall{},
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		roots:    map[string]transcriptRoot{},
+		offsets:  map[string]int64{},
+		pending:  map[string]pendingToolCall{},
+		metadata: coworkMetadataCache{entries: map[string]coworkMetadataCacheEntry{}},
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 	monitor.SetTargets(targets)
 	monitor.poll()
@@ -231,7 +234,15 @@ func (m *transcriptMonitor) poll() {
 		}
 		m.auditFileCount += len(files)
 		for _, path := range files {
-			if err := m.consumeFile(path, root.target); err != nil {
+			metadata, changed, metadataErr := m.metadata.load(path)
+			if metadataErr != nil {
+				logs.Warn("failed to read optional Cowork session metadata: %v", metadataErr)
+			}
+			sessionKey := metadata.sessionKey(path)
+			if changed {
+				object.SetSessionTitle(sessionKey, metadata.Title)
+			}
+			if err := m.consumeFile(path, root.target, sessionKey); err != nil {
 				m.lastErr = err
 			}
 		}
@@ -273,7 +284,7 @@ func auditFiles(root string) ([]string, bool, error) {
 	return result, true, err
 }
 
-func (m *transcriptMonitor) consumeFile(path string, target monitorTarget) error {
+func (m *transcriptMonitor) consumeFile(path string, target monitorTarget, sessionKey string) error {
 	key := strings.ToLower(filepath.Clean(path))
 	offset := m.offsets[key]
 
@@ -327,7 +338,7 @@ func (m *transcriptMonitor) consumeFile(path string, target monitorTarget) error
 		offset += consumed
 		m.offsets[key] = offset
 		if !oversized {
-			m.consumeLine(path, target, bytes.TrimSpace(line))
+			m.consumeLine(target, sessionKey, bytes.TrimSpace(line))
 		}
 		line = line[:0]
 		consumed = 0
@@ -335,7 +346,7 @@ func (m *transcriptMonitor) consumeFile(path string, target monitorTarget) error
 	}
 }
 
-func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line []byte) {
+func (m *transcriptMonitor) consumeLine(target monitorTarget, sessionKey string, line []byte) {
 	if len(line) == 0 {
 		return
 	}
@@ -375,10 +386,6 @@ func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line 
 			contentLength = utf8.RuneCountInString(transcriptField(value, "text"))
 		}
 	}
-	session := transcriptField(entry, "sessionId", "session_id")
-	if session == "" {
-		session = strings.TrimPrefix(filepath.Base(filepath.Dir(path)), "local_")
-	}
 	model := transcriptField(message, "model")
 	if model == "" {
 		model = transcriptField(entry, "model")
@@ -408,7 +415,7 @@ func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line 
 			EventType:   eventType,
 			Action:      action,
 			Outcome:     outcome,
-			SessionKey:  session,
+			SessionKey:  sessionKey,
 			Model:       model,
 			Object:      string(payload),
 		})
@@ -423,7 +430,7 @@ func (m *transcriptMonitor) consumeLine(path string, target monitorTarget, line 
 			}
 			id := transcriptField(block, "id")
 			call := pendingToolCall{
-				target: target, started: when, session: session, id: id,
+				target: target, started: when, session: sessionKey, id: id,
 				name: name, model: model,
 			}
 			if server, tool, ok := auditutil.ParseMcpTool(name, "mcp__"); ok {
