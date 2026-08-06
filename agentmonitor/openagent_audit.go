@@ -46,6 +46,17 @@ type openAgentAuditEntry struct {
 	Outcome         string `json:"outcome"`
 	Action          string `json:"action"`
 	DurationMs      int64  `json:"durationMs"`
+	// Role and Text are only set on a "message" event - OpenAgent's one
+	// deliberate exception to writing metadata only (see its audit package
+	// doc). Everywhere else in this parser, a field this size would be
+	// conversation content and out of scope; here it is the content, by
+	// request, and openAgentMessageRecord is the one place it is handled.
+	Role string `json:"role"`
+	Text string `json:"text"`
+	// Title carries a "chat_title" event's short label for the chat - the same
+	// label OpenAgent's own chat list shows for it - not the prompt or
+	// response text that produced it.
+	Title string `json:"title"`
 }
 
 func parseOpenAgentAuditLine(line []byte, cursor *openAgentCursor, claim *openAgentClaim) []*object.Record {
@@ -68,6 +79,10 @@ func parseOpenAgentAuditLine(line []byte, cursor *openAgentCursor, claim *openAg
 		return openAgentLlmRecord(entry, cursor, claim, when)
 	case "session":
 		return openAgentSessionRecord(entry, cursor, claim, when)
+	case "message":
+		return openAgentMessageRecord(entry, cursor, claim, when)
+	case "chat_title":
+		return openAgentChatTitleRecord(entry, cursor, claim, when)
 	default:
 		return nil
 	}
@@ -122,6 +137,28 @@ func openAgentLlmRecord(entry openAgentAuditEntry, cursor *openAgentCursor, clai
 	return []*object.Record{record}
 }
 
+// openAgentMessageRecord turns a "message" event into a record carrying the
+// question or answer text itself, in record.Object - the one record type
+// from this agent that is not metadata-only, matching the one event type
+// OpenAgent's audit log is not metadata-only about. entry.Role becomes the
+// record's Action ("user" or "assistant") rather than a fixed "call"/"start"
+// verb, since that is what distinguishes the two events of a turn here.
+//
+// SanitizeString below only strips known credential formats (see its
+// comment) - it is not a PII or secrets scanner, so this record can still
+// carry whatever the user actually typed. Treat it as visible to anyone who
+// can read the Records page or the record log file.
+func openAgentMessageRecord(entry openAgentAuditEntry, cursor *openAgentCursor, claim *openAgentClaim, when time.Time) []*object.Record {
+	role := openAgentActionOr(entry.Role, "")
+	if role != "user" && role != "assistant" || entry.Text == "" {
+		return nil
+	}
+	record := openAgentBaseRecord(cursor, claim, when)
+	record.EventType, record.Action = "message", role
+	record.Object = auditutil.SanitizeString(entry.Text)
+	return []*object.Record{record}
+}
+
 func openAgentSessionRecord(entry openAgentAuditEntry, cursor *openAgentCursor, claim *openAgentClaim, when time.Time) []*object.Record {
 	action := openAgentActionOr(entry.Action, "start")
 	if action != "start" && action != "end" {
@@ -129,6 +166,21 @@ func openAgentSessionRecord(entry openAgentAuditEntry, cursor *openAgentCursor, 
 	}
 	record := openAgentBaseRecord(cursor, claim, when)
 	record.EventType, record.Action = "session", action
+	return []*object.Record{record}
+}
+
+// openAgentChatTitleRecord turns a "chat_title" event into a record carrying
+// only Record.Title - the same field Claude Code's transcript title fills in
+// (object/record_store.go's sessionTitle prefers it over a guess regardless
+// of which agent set it). A blank title is a malformed event, not a record
+// worth keeping.
+func openAgentChatTitleRecord(entry openAgentAuditEntry, cursor *openAgentCursor, claim *openAgentClaim, when time.Time) []*object.Record {
+	if entry.Title == "" {
+		return nil
+	}
+	record := openAgentBaseRecord(cursor, claim, when)
+	record.EventType, record.Action = "session", "title"
+	record.Title = entry.Title
 	return []*object.Record{record}
 }
 

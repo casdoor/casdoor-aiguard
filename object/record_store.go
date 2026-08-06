@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/conf"
@@ -60,12 +59,7 @@ func newRecordStore() *recordStore {
 func SetSessionTitle(sessionKey, title string) {
 	title = strings.TrimSpace(title)
 	if len(title) > maxRecordTitleBytes {
-		const suffix = "..."
-		limit := maxRecordTitleBytes - len(suffix)
-		for limit > 0 && !utf8.RuneStart(title[limit]) {
-			limit--
-		}
-		title = title[:limit] + suffix
+		title = truncateUTF8(title, maxRecordTitleBytes, "...")
 	}
 
 	records.mutex.Lock()
@@ -89,15 +83,32 @@ func sessionTitlesSnapshot() map[string]string {
 }
 
 // InitRecordLog opens the record log file for appending. Call once at startup.
+//
+// Opened at 0o600, not the more permissive 0o644 other logs in this codebase
+// use: this file now holds real conversation text for an OpenAgent "message"
+// record (see Record.Object's comment), not just small structured metadata,
+// so any other local account being able to read it is a bigger deal than it
+// used to be. O_CREATE's mode argument only applies the first time a path is
+// created, so a record log from before this line existed - or one that
+// inherited a looser mode from an operator's umask - would otherwise keep
+// its old permissions forever; the explicit Chmod below tightens it on every
+// startup instead of only for a file this process happens to create itself.
 func InitRecordLog() error {
-	path := conf.GetRecordLogFile()
+	return initRecordLogAt(conf.GetRecordLogFile())
+}
+
+func initRecordLogAt(path string) error {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
 		return err
 	}
 	records.mutex.Lock()

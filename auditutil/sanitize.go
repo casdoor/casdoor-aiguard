@@ -16,6 +16,17 @@
 // by agent collectors. What an agent did is worth recording in full; the
 // secrets that happen to pass through it are not, so values are stripped of
 // recognizable credentials and bounded here before being sent or persisted.
+//
+// "Recognizable" is doing real work in that sentence: SanitizeString and
+// SanitizeValue match known credential *formats* (bearer tokens, cloud/API
+// key shapes, PEM private key blocks) against a fixed set of patterns - this
+// is not a general PII or secrets scanner, and was never meant to be one. A
+// password typed in plain language, an ID or account number, or an internal
+// secret that does not happen to match one of those formats passes through
+// untouched. Callers that hand this package free text an agent's user
+// actually wrote - as opposed to short, structured tool arguments - are
+// relying on it for exactly the same narrow guarantee: known formats caught,
+// nothing else promised. See SanitizeString for the specifics.
 package auditutil
 
 import (
@@ -74,7 +85,17 @@ func SensitiveKey(key string) bool {
 }
 
 // SanitizeString redacts credential formats that may appear inside an error,
-// prompt, command or other non-secret-named field.
+// prompt, command or other non-secret-named field: a PEM private key block,
+// a "Bearer <token>" header, or one of a handful of well-known API key
+// shapes (OpenAI/Anthropic sk-..., GitHub tokens, AWS AKIA..., Google
+// AIza..., Slack xox..., a bare JWT). Nothing outside those specific formats
+// is touched - this is pattern matching against known credential shapes, not
+// content-aware secret or PII detection, and it makes no attempt to
+// recognize a password, an ID number or a company's own internal token
+// scheme. A caller passing this whatever an agent's user actually typed -
+// OpenAgent's "message" records, most notably - is relying on it to catch
+// only what these patterns catch, not on it having reviewed the text for
+// sensitivity in any broader sense.
 func SanitizeString(value string) string {
 	value = privateKeyPattern.ReplaceAllString(value, "[REDACTED PRIVATE KEY]")
 	value = bearerPattern.ReplaceAllString(value, "${1}[REDACTED]")

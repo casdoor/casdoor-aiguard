@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Alert, Descriptions, Select, Space, Table, Tag, Tooltip, Typography, message} from "antd";
 import {BulbOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link, useHistory, useLocation} from "react-router-dom";
@@ -33,6 +33,51 @@ const codeBlockStyle = {
   fontFamily: "monospace",
   fontSize: 12,
 };
+
+// The Message column shows the full text of a "message" record inline, not
+// a snippet behind a tooltip - so a reader can tell what was said without
+// opening the row. Long messages still get a scrollbar rather than blowing
+// out the row height.
+const messageTextStyle = {
+  display: "block",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  maxHeight: 160,
+  overflow: "auto",
+};
+
+// An OpenAgent reply is reported as several records: the tool_call/llm_call
+// events that produced it, then the "message assistant" record for the reply
+// itself. Flattened, the list reads as one row per underlying call instead of
+// one row per reply. This groups each assistant message with the calls that
+// immediately preceded it in the same session (up to the previous message
+// record) so they nest under it as supportingRecords instead of appearing as
+// separate top-level rows.
+function groupRecordsBySupportingCalls(records) {
+  const consumed = new Set();
+  const roots = [];
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    if (consumed.has(record.id)) {
+      continue;
+    }
+    if (record.eventType !== "message" || record.action !== "assistant") {
+      roots.push(record);
+      continue;
+    }
+    const supporting = [];
+    for (let j = i + 1; j < records.length; j++) {
+      const candidate = records[j];
+      if (candidate.sessionKey !== record.sessionKey || candidate.eventType === "message") {
+        break;
+      }
+      supporting.push(candidate);
+      consumed.add(candidate.id);
+    }
+    roots.push(supporting.length > 0 ? {...record, supportingRecords: supporting} : record);
+  }
+  return roots;
+}
 
 // Payloads arrive as a JSON string; pretty-print when we can, show the raw text
 // when we cannot, so a malformed payload is still inspectable.
@@ -140,7 +185,7 @@ function RecordDetail({record}) {
       )}
       {record.reason && <Descriptions.Item label="Reason">{record.reason}</Descriptions.Item>}
       {record.object && (
-        <Descriptions.Item label="Payload">
+        <Descriptions.Item label={record.eventType === "message" ? "Message text" : "Payload"}>
           <pre style={codeBlockStyle}>{prettyObject(record.object)}</pre>
         </Descriptions.Item>
       )}
@@ -192,6 +237,7 @@ export default function RecordsPage() {
   ];
 
   const corrected = records.filter((record) => record.feedback).length;
+  const groupedRecords = useMemo(() => groupRecordsBySupportingCalls(records), [records]);
 
   const setFilter = (key, value) => {
     const params = new URLSearchParams(location.search);
@@ -240,6 +286,24 @@ export default function RecordsPage() {
             {target && <Text code>{target}</Text>}
             {record.model && <Text type="secondary">{record.model}</Text>}
           </Space>
+        );
+      },
+    },
+    {
+      // Only an OpenAgent "message" record (Action "user"/"assistant")
+      // populates this - every other agent and event type leaves it blank,
+      // by design (see object/record.go's Object field comment).
+      title: "Message",
+      key: "message",
+      width: 320,
+      render: (_, record) => {
+        if (record.eventType !== "message" || !record.object) {
+          return null;
+        }
+        return (
+          <Text italic style={messageTextStyle}>
+            {record.action === "user" ? "“" : "→ "}{record.object}{record.action === "user" ? "”" : ""}
+          </Text>
         );
       },
     },
@@ -329,7 +393,7 @@ export default function RecordsPage() {
             style={{width: 160}}
             options={[
               {value: "", label: "All categories"},
-              ...["session", "prompt", "llm", "tool", "mcp", "permission", "subagent", "compact"]
+              ...["session", "prompt", "llm", "message", "tool", "mcp", "permission", "subagent", "compact"]
                 .map((value) => ({value, label: value})),
             ]}
           />
@@ -353,13 +417,33 @@ export default function RecordsPage() {
       {error && <Alert type="error" message={error} style={{marginBottom: 16}} />}
       <Table
         rowKey="id"
-        dataSource={records}
+        dataSource={groupedRecords}
         columns={columns}
         pagination={{pageSize: 20}}
         size="small"
         locale={{emptyText: "No records yet - patch an agent to start collecting them"}}
         expandable={{
-          expandedRowRender: (record) => <RecordDetail record={record} />,
+          expandedRowRender: (record) => (
+            <>
+              <RecordDetail record={record} />
+              {record.supportingRecords && record.supportingRecords.length > 0 && (
+                <div style={{margin: "0 8px 8px"}}>
+                  <Text type="secondary" style={{display: "block", marginBottom: 4}}>
+                    Calls that produced this reply
+                  </Text>
+                  <Table
+                    rowKey="id"
+                    dataSource={record.supportingRecords}
+                    columns={columns}
+                    size="small"
+                    pagination={false}
+                    showHeader={false}
+                    expandable={{expandedRowRender: (child) => <RecordDetail record={child} />}}
+                  />
+                </div>
+              )}
+            </>
+          ),
         }}
       />
     </div>

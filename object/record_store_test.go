@@ -14,13 +14,75 @@
 
 package object
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // resetRecordStore gives each test its own empty ring buffer, without a log
 // file, so tests do not see each other's records or touch disk.
 func resetRecordStore(t *testing.T) {
 	t.Helper()
 	records = newRecordStore()
+}
+
+func TestInitRecordLogOpensAtOwnerOnlyPermissions(t *testing.T) {
+	resetRecordStore(t)
+	path := filepath.Join(t.TempDir(), "record.log")
+
+	if err := initRecordLogAt(path); err != nil {
+		t.Fatalf("initRecordLogAt: %v", err)
+	}
+	t.Cleanup(func() {
+		records.mutex.Lock()
+		if records.logFile != nil {
+			records.logFile.Close()
+		}
+		records.mutex.Unlock()
+	})
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat record log: %v", err)
+	}
+	// This file now holds real conversation text for an OpenAgent "message"
+	// record (see Record.Object's comment), so it must not be readable by any
+	// other local account.
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("record log permissions = %o, want 0600", got)
+	}
+}
+
+// TestInitRecordLogTightensAnExistingFilesPermissions covers the upgrade
+// path: a record log created by an older aiguard (0o644, or whatever an
+// operator's umask produced) must not keep that looser mode forever just
+// because os.OpenFile's mode argument only applies at creation.
+func TestInitRecordLogTightensAnExistingFilesPermissions(t *testing.T) {
+	resetRecordStore(t)
+	path := filepath.Join(t.TempDir(), "record.log")
+	if err := os.WriteFile(path, []byte(`{"id":"r1"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := initRecordLogAt(path); err != nil {
+		t.Fatalf("initRecordLogAt: %v", err)
+	}
+	t.Cleanup(func() {
+		records.mutex.Lock()
+		if records.logFile != nil {
+			records.logFile.Close()
+		}
+		records.mutex.Unlock()
+	})
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat record log: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("record log permissions = %o, want 0600 even though the file pre-existed at a looser mode", got)
+	}
 }
 
 func TestListSessionsGroupsAndSummarizes(t *testing.T) {

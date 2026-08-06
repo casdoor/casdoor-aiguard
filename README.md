@@ -266,6 +266,21 @@ them as **logged** and does not offer feedback learning. Hook payloads have
 recognizable credentials redacted and are capped at 64 KiB before leaving the
 hook process.
 
+Every record is metadata-only — which tool ran, which model answered, whether
+it was blocked — with one declared exception: OpenAgent's `message` records
+carry the actual question and answer text of a turn, by explicit request, so
+that text is visible on the Records page and in the append-only record log.
+No other agent's records, and no other OpenAgent record, ever carry
+conversation content.
+
+The credential redaction that free-text fields go through (message text,
+error text, command lines, ...) strips known credential *formats* — bearer tokens,
+cloud/API key shapes, PEM private key blocks — not general PII or secrets; a
+password typed in plain language, an ID number, or an internal secret that
+does not match one of those formats passes through untouched. Treat message
+content as visible to anyone who can read the Records page or the record log
+file, not as pre-screened for sensitivity.
+
 ![Records](docs/images/records.png)
 
 The **Feedback** column is the one field of a record a human writes. Saying "this

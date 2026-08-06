@@ -16,6 +16,7 @@ package object
 
 import (
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -77,11 +78,18 @@ type Record struct {
 	McpTool   string `json:"mcpTool,omitempty"`
 
 	// Model and duration are retained when the hook supplies them. No model API
-	// request or response bodies are collected.
+	// request or response bodies are collected, with one disclosed exception:
+	// OpenAgent's "message" records (EventType "message", Action "user" or
+	// "assistant") carry the actual question or answer text in Object, by
+	// explicit request - see agentmonitor/openagent_audit.go's
+	// openAgentMessageRecord. Every other record from every agent stays
+	// metadata-only.
 	Model      string `json:"model,omitempty"`
 	DurationMs int64  `json:"durationMs,omitempty"`
 
-	// Object is the event payload as JSON, and Detail a human-readable note.
+	// Object is normally the event payload as JSON, and Detail a human-readable
+	// note - except an OpenAgent "message" record, where Object is the plain
+	// message text itself (see above).
 	Object string `json:"object,omitempty"`
 	Detail string `json:"detail,omitempty"`
 
@@ -159,9 +167,39 @@ func (r *Record) normalize() {
 	}
 	r.Correctable = r.IsCorrectable()
 	if len(r.Object) > maxRecordObjectBytes {
-		r.Object = r.Object[:maxRecordObjectBytes] + "\n...[truncated]"
+		r.Object = truncateUTF8(r.Object, maxRecordObjectBytes, "\n...[truncated]")
 	}
 	if len(r.Title) > maxRecordTitleBytes {
-		r.Title = r.Title[:maxRecordTitleBytes] + "..."
+		r.Title = truncateUTF8(r.Title, maxRecordTitleBytes, "...")
 	}
+}
+
+// truncateUTF8 cuts s to at most maxBytes bytes (including suffix) without
+// splitting a multi-byte rune in two. Before OpenAgent's "message" records
+// started carrying real conversation text (see the Object field comment
+// above), this cap was never reached in practice - Object held only small
+// JSON metadata - so a plain byte slice never had a multi-byte character to
+// land on. A long conversation, especially one in a language where every
+// character is multiple bytes in UTF-8, changes that: cutting mid-rune
+// leaves a dangling partial sequence that json.Marshal replaces with U+FFFD,
+// which the UI would show as garbled text at the end of an otherwise
+// readable truncation. This backs the cut point off byte by byte until it
+// lands on a rune boundary, the same way SetSessionTitle already does for a
+// live-updated session title.
+func truncateUTF8(s string, maxBytes int, suffix string) string {
+	limit := maxBytes - len(suffix)
+	if limit < 0 {
+		limit = 0
+	}
+	// s already fits without cutting anything - both callers only reach here
+	// once they already know it does not, but staying correct for a caller
+	// that does not costs nothing here and avoids indexing s out of bounds
+	// below, at exactly len(s).
+	if limit >= len(s) {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + suffix
 }
