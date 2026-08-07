@@ -53,15 +53,15 @@ var probeHosts = []string{"127.0.0.1", "::1"}
 type Server struct {
 	// Ports are the TCP ports the program listens on out of the box. A program
 	// reconfigured onto another port is out of this package's reach.
-	Ports []int
+	Ports []int `json:"ports,omitempty"`
 	// ProbePath is the endpoint the confirmation request asks for. It must
 	// answer without authentication, since this package holds no credentials,
 	// and should be the cheapest such endpoint the program exposes.
-	ProbePath string
+	ProbePath string `json:"probePath,omitempty"`
 	// ProbeMarkers are case-insensitive substrings of the probe response - its
 	// headers and body together - that only this program emits. Any one of them
 	// confirms the listener; with none of them present the port is left alone.
-	ProbeMarkers []string
+	ProbeMarkers []string `json:"probeMarkers,omitempty"`
 
 	// VersionPath is an endpoint answering JSON that carries the version the
 	// program reports about itself, and VersionFields walks that JSON to the
@@ -74,8 +74,8 @@ type Server struct {
 	// is: one that turns out to need credentials, or that answers something
 	// other than a version string, yields "" and leaves the caller to fall back
 	// to whatever the binary itself records.
-	VersionPath   string
-	VersionFields []string
+	VersionPath   string   `json:"versionPath,omitempty"`
+	VersionFields []string `json:"versionFields,omitempty"`
 }
 
 // Process is a process holding a listening TCP port.

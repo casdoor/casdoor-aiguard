@@ -1,0 +1,11 @@
+{
+  "id": "cursor-agent",
+  "displayName": "Cursor Agent",
+  "execName": "cursor-agent",
+  "stateDir": "cursor-agent",
+  "windowsProgramDirs": ["cursor-agent"],
+  "cmdMarkers": ["cursor-agent"],
+  "notes": [
+    "The CLI has its own installer on Windows, separate from the editor's."
+  ]
+}

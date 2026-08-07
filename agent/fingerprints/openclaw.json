@@ -1,0 +1,12 @@
+{
+  "id": "openclaw",
+  "displayName": "OpenClaw",
+  "execName": "openclaw",
+  "npmPackage": "openclaw",
+  "extraUnixNpmDirs": [".openclaw/tools/node-v*/lib"],
+  "extraWindowsNpmDirs": ["OpenClaw/deps/portable-node"],
+  "cmdMarkers": ["openclaw"],
+  "notes": [
+    "OpenClaw can bring its own Node runtime, which puts the package outside every shared version manager layout - hence the extra npm directories."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "hermes-agent",
+  "displayName": "Hermes Agent",
+  "execName": "hermes",
+  "cmdMarkers": ["hermes_cli", "/hermes-agent/hermes", "\\hermes-agent\\hermes"],
+  "extraExecRules": [
+    { "suffix": "/.local/bin/hermes" },
+    { "exact": "/usr/local/bin/hermes" },
+    { "contains": ["/hermes-agent/venv/bin/python"] },
+    { "contains": ["/hermes-agent/venv/scripts/python"] },
+    { "contains": ["/hermes/hermes-agent/venv/scripts/hermes.exe"] }
+  ]
+}

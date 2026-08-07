@@ -1,0 +1,10 @@
+{
+  "id": "cursor",
+  "displayName": "Cursor",
+  "execName": "Cursor",
+  "windowsProgramDirs": ["cursor"],
+  "homebrewCasks": ["cursor"],
+  "notes": [
+    "Cursor ships a Windows setup installer that writes the whole editor into one directory, machine-wide or per-user."
+  ]
+}

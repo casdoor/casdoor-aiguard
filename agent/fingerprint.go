@@ -24,207 +24,91 @@ import (
 // Fingerprint is the complete per-agent data set. Everything that differs
 // between agents lives here; the discovery and identification logic in this
 // package is shared and reads only these fields. Adding support for a new
-// agent should mean adding one entry to fingerprints, not new scan code.
+// agent should mean adding one file to fingerprints/, not new scan code.
+//
+// It carries no behaviour, only data, which is why the registry ships as one
+// JSON file per agent rather than as Go literals: this struct is the schema of
+// those files, and its field comments document them. See fingerprint_load.go
+// for how they are read and what the loader rejects.
 //
 // Every field is optional: a scanner skips an agent whose relevant field is
-// empty, so a cmdline-only agent needs nothing but Name and CmdMarkers.
+// empty, so a cmdline-only agent needs nothing but ID, DisplayName and
+// CmdMarkers.
 type Fingerprint struct {
 	// ID is the stable identifier reported for a recognized process, and
-	// DisplayName is the human-readable name reported for an installation.
-	ID          string
-	DisplayName string
+	// DisplayName is the human-readable name reported for an installation. ID
+	// must also be the base name of the file the fingerprint is read from.
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 
 	// ExecName is the launcher's base name, without the Windows ".exe".
-	ExecName string
+	ExecName string `json:"execName,omitempty"`
 	// StateDir is the directory under ~/.local/share holding the versioned
 	// payloads of the per-user native installer.
-	StateDir string
+	StateDir string `json:"stateDir,omitempty"`
 	// NpmPackage is the exact "name" field of the published npm package.
-	NpmPackage string
+	NpmPackage string `json:"npmPackage,omitempty"`
 	// ExtraUnixNpmDirs are agent-specific directories, relative to the user's
 	// home and slash-separated, that hold a "node_modules" alongside a bundled
 	// Node runtime. ExtraWindowsNpmDirs is the same, relative to %LOCALAPPDATA%.
 	// Both may contain glob wildcards. Agents installed only through a shared
 	// Node version manager need neither.
-	ExtraUnixNpmDirs    []string
-	ExtraWindowsNpmDirs []string
+	ExtraUnixNpmDirs    []string `json:"extraUnixNpmDirs,omitempty"`
+	ExtraWindowsNpmDirs []string `json:"extraWindowsNpmDirs,omitempty"`
 	// WingetPackage is the winget package identifier, without its hash suffix.
-	WingetPackage string
+	WingetPackage string `json:"wingetPackage,omitempty"`
 	// MSIXFamily is the Windows package family name ("<Name>_<PublisherId>").
-	MSIXFamily string
+	MSIXFamily string `json:"msixFamily,omitempty"`
 	// DesktopInstallerDir is the directory under %LOCALAPPDATA% used by the
 	// standalone desktop installer.
-	DesktopInstallerDir string
+	DesktopInstallerDir string `json:"desktopInstallerDir,omitempty"`
 	// WindowsProgramDirs are the installation directories of a Windows
 	// setup-style installer, each slash-separated and relative to a Program
 	// Files root - and to %LOCALAPPDATA%\Programs, where the very same
 	// installer lands when it is run for a single user instead of the machine.
-	WindowsProgramDirs []string
+	WindowsProgramDirs []string `json:"windowsProgramDirs,omitempty"`
 	// WindowsUserDirs are installation directories relative to %LOCALAPPDATA%,
 	// slash-separated, for per-user installers that lay out their own tree
 	// rather than reusing the Programs directory.
-	WindowsUserDirs []string
+	WindowsUserDirs []string `json:"windowsUserDirs,omitempty"`
 	// HomebrewCasks lists the cask names that install this agent.
-	HomebrewCasks []string
+	HomebrewCasks []string `json:"homebrewCasks,omitempty"`
 	// SystemPackage is the package name used by apt, rpm and apk alike.
-	SystemPackage string
+	SystemPackage string `json:"systemPackage,omitempty"`
 	// BuildInfoModule is the Go main-module path of an agent built in Go. When
 	// set, a scan reads the binary's embedded build metadata (without executing
 	// it) to recover a version an install layout with no versioned directory or
 	// manifest cannot supply.
-	BuildInfoModule string
+	BuildInfoModule string `json:"buildInfoModule,omitempty"`
 	// BuildInfoVersionVar is the -ldflags -X variable the agent stamps its own
 	// version into, preferred over the module version because it is the version
 	// the agent reports about itself.
-	BuildInfoVersionVar string
+	BuildInfoVersionVar string `json:"buildInfoVersionVar,omitempty"`
 	// VersionFile is a plain-text file, next to the binary, whose first line is
 	// the version. It is the fallback for release binaries stripped of build
 	// metadata (-trimpath, UPX), which the agent writes there itself at startup.
-	VersionFile string
+	VersionFile string `json:"versionFile,omitempty"`
 
 	// CmdMarkers are substrings that identify the agent in a process command
 	// line. Runtimes like Node.js report a generic comm ("node"), so the agent
 	// is only visible in the argv or script path.
-	CmdMarkers []string
+	CmdMarkers []string `json:"cmdMarkers,omitempty"`
 	// ExtraExecRules covers executable layouts that the fields above do not
 	// imply. Most agents need none.
-	ExtraExecRules []PathRule
+	ExtraExecRules []PathRule `json:"extraExecRules,omitempty"`
 
 	// LocalServer describes the HTTP server the agent runs on the loopback
 	// interface, so a scan can find it by the port it answers on even when its
 	// binary sits outside every layout above. Nil for agents that run no
 	// server; see the localserver package for what the fields mean.
-	LocalServer *localserver.Server
-}
+	LocalServer *localserver.Server `json:"localServer,omitempty"`
 
-// fingerprints is the registry of agents aiguard knows how to recognize.
-var fingerprints = append([]Fingerprint{
-	{
-		ID:            "claude-code",
-		DisplayName:   "Claude Code",
-		ExecName:      "claude",
-		StateDir:      "claude",
-		NpmPackage:    "@anthropic-ai/claude-code",
-		WingetPackage: "Anthropic.ClaudeCode",
-		HomebrewCasks: []string{"claude-code", "claude-code@latest"},
-		SystemPackage: "claude-code",
-	},
-	{
-		ID:                  "claude-desktop",
-		DisplayName:         "Claude Desktop",
-		ExecName:            "claude",
-		MSIXFamily:          "Claude_pzs8sxrjxfjjc",
-		DesktopInstallerDir: "AnthropicClaude",
-	},
-	{
-		ID:          "openclaw",
-		DisplayName: "OpenClaw",
-		ExecName:    "openclaw",
-		NpmPackage:  "openclaw",
-		// OpenClaw can bring its own Node runtime, which puts the package
-		// outside every shared version manager layout.
-		ExtraUnixNpmDirs:    []string{".openclaw/tools/node-v*/lib"},
-		ExtraWindowsNpmDirs: []string{"OpenClaw/deps/portable-node"},
-		CmdMarkers:          []string{"openclaw"},
-	},
-	{
-		ID:          "hermes-agent",
-		DisplayName: "Hermes Agent",
-		ExecName:    "hermes",
-		CmdMarkers:  []string{"hermes_cli", "/hermes-agent/hermes", `\hermes-agent\hermes`},
-		ExtraExecRules: []PathRule{
-			{Suffix: "/.local/bin/hermes"},
-			{Exact: "/usr/local/bin/hermes"},
-			{Contains: []string{"/hermes-agent/venv/bin/python"}},
-			{Contains: []string{"/hermes-agent/venv/scripts/python"}},
-			{Contains: []string{"/hermes/hermes-agent/venv/scripts/hermes.exe"}},
-		},
-	},
-	{
-		ID:          "cursor",
-		DisplayName: "Cursor",
-		ExecName:    "Cursor",
-		// Cursor ships a Windows setup installer that writes the whole editor
-		// into one directory, machine-wide or per-user.
-		WindowsProgramDirs: []string{"cursor"},
-		HomebrewCasks:      []string{"cursor"},
-	},
-	{
-		ID:          "cursor-agent",
-		DisplayName: "Cursor Agent",
-		ExecName:    "cursor-agent",
-		StateDir:    "cursor-agent",
-		// The CLI has its own installer on Windows, separate from the editor's.
-		WindowsProgramDirs: []string{"cursor-agent"},
-		CmdMarkers:         []string{"cursor-agent"},
-	},
-	{
-		ID:                 "windsurf",
-		DisplayName:        "Windsurf",
-		ExecName:           "Windsurf",
-		WindowsProgramDirs: []string{"Windsurf"},
-		HomebrewCasks:      []string{"windsurf"},
-	},
-	{
-		ID:          "openagent",
-		DisplayName: "OpenAgent",
-		ExecName:    "openagent",
-		// The one-step installer lays out a flat tree, not the versioned one the
-		// other native installers use: the single binary sits directly in
-		// ~/.local/share/openagent with a launcher symlinked onto PATH at
-		// ~/.local/bin/openagent, so StateDir finds the launcher while the
-		// version stays empty. On Windows the same binary lands in
-		// %LOCALAPPDATA%\openagent.
-		StateDir:        "openagent",
-		WindowsUserDirs: []string{"openagent"},
-		// The flat installer has no versioned directory or manifest, so the version
-		// comes from the binary's own build metadata: OpenAgent stamps its version
-		// into internal/cli.Version via -ldflags, which a scan reads without ever
-		// starting the server.
-		BuildInfoModule:     "github.com/the-open-agent/openagent",
-		BuildInfoVersionVar: "github.com/the-open-agent/openagent/internal/cli.Version",
-		VersionFile:         "version",
-		// OpenAgent ships as a single binary named "openagent", so its executable
-		// path ends in "/openagent" (or "/openagent.exe") wherever it runs from -
-		// the packaged install, a custom directory, or a build from source. The
-		// interception layer resolves a process's real /proc/<pid>/exe, so
-		// matching the basename attributes a running OpenAgent at any path, the
-		// same way the cmdline markers do for the interpreter-hosted agents. The
-		// name is distinctive enough to carry the match on its own. (The Agents
-		// scan still only lists known install layouts; it never walks the disk,
-		// so a source checkout is identified when it runs, not enumerated.)
-		ExtraExecRules: []PathRule{
-			{Suffix: "/openagent"},
-			{Suffix: "/openagent.exe"},
-		},
-		// OpenAgent is a server: it serves its whole UI and API from one port,
-		// 14000 by default, so a running instance can be found by asking that
-		// port who it is. That reaches installations no layout covers - a build
-		// run straight out of a source checkout, most of all - which is why it
-		// is worth a probe on top of the paths above.
-		//
-		// The probe endpoint is the unauthenticated health check, and the marker
-		// is the session cookie OpenAgent names after itself
-		// (beego.BConfig.WebConfig.Session.SessionName in its main.go). The
-		// cookie rides on every response, including error ones, so the marker
-		// holds even when the server is unhappy or its frontend was never built.
-		//
-		// A running OpenAgent also reports its own version, which beats reading
-		// it out of the binary: a server answering "v2.87.0" settles what is
-		// actually running, where build metadata can be stripped or absent.
-		// Note that /api/get-version-info is not on OpenAgent's anonymous
-		// casbin policy today, so it answers "this operation requires admin
-		// privilege" to a scan and the version falls back to the binary's build
-		// info until that endpoint is opened up the way /api/health is.
-		LocalServer: &localserver.Server{
-			Ports:         []int{14000},
-			ProbePath:     "/api/health",
-			ProbeMarkers:  []string{"openagent_session_id"},
-			VersionPath:   "/api/get-version-info",
-			VersionFields: []string{"data", "version"},
-		},
-	},
-}, codexFingerprints...)
+	// Notes is documentation, never read by any scan: it is where the reasoning
+	// that used to sit in a comment beside a Go literal goes, now that the
+	// registry is JSON and cannot carry comments. Anything explaining *why* an
+	// entry looks the way it does belongs here, next to the data it explains.
+	Notes []string `json:"notes,omitempty"`
+}
 
 // Directories that hold an agent launcher once a system or Homebrew package
 // manager has installed it.
@@ -246,11 +130,18 @@ var windowsProgramRoots = []string{
 // PathRule matches a normalized executable path: lowercased, forward-slashed
 // and cleaned. A rule matches when every constraint it sets holds, so a rule
 // can require both a directory marker and a file name. The zero rule never
-// matches.
+// matches, and the loader rejects one rather than shipping a rule that is
+// silently dead.
 type PathRule struct {
-	Exact    string
-	Suffix   string
-	Contains []string
+	Exact    string   `json:"exact,omitempty"`
+	Suffix   string   `json:"suffix,omitempty"`
+	Contains []string `json:"contains,omitempty"`
+}
+
+// isEmpty reports a rule that constrains nothing. Such a rule never matches, so
+// in a data file it is always a mistake.
+func (r PathRule) isEmpty() bool {
+	return r.Exact == "" && r.Suffix == "" && len(r.Contains) == 0
 }
 
 func (r PathRule) matches(path string) bool {

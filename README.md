@@ -481,7 +481,8 @@ All responses use Casdoor's `{ "status": "ok", "msg": "", "data": ... }` envelop
 ```
 main.go                 bootstrap: settings, policy, audit, CA, proxy, web
 conf/                   app.conf, policy.yaml, config helpers
-agent/                  per-OS scanners + fingerprints of known AI agents
+agent/                  per-OS scanners + the agent fingerprint registry
+agent/fingerprints/     what aiguard knows about each agent, one JSON per agent
 patch/                  per-agent instrumentation and file backup journal
 mcpserver/              aiguard as an MCP server (how Claude Desktop is patched)
 agenthook/              shared command-hook normalizer and reporter

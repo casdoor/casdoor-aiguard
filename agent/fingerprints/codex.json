@@ -1,0 +1,14 @@
+{
+  "id": "codex",
+  "displayName": "ChatGPT Desktop (Codex)",
+  "execName": "ChatGPT",
+  "msixFamily": "OpenAI.Codex_2p2nqsd0c76g0",
+  "extraExecRules": [
+    { "suffix": "/chatgpt.app/contents/macos/chatgpt" },
+    { "suffix": "/codex.app/contents/macos/codex" },
+    {
+      "contains": ["/windowsapps/openai.codex_", "__2p2nqsd0c76g0/app/"],
+      "suffix": "/codex.exe"
+    }
+  ]
+}

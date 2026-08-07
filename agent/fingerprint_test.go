@@ -126,24 +126,10 @@ func TestIdentifyCmdline(t *testing.T) {
 	}
 }
 
-// TestFingerprintsAreDistinct guards the registry itself: two agents that claim
-// the same ID, or a fingerprint carrying neither path nor cmdline evidence,
-// would make detection results ambiguous or dead.
-func TestFingerprintsAreDistinct(t *testing.T) {
-	seen := map[string]bool{}
-	for _, fingerprint := range compiledFingerprints {
-		if fingerprint.ID == "" || fingerprint.DisplayName == "" {
-			t.Errorf("fingerprint %+v is missing an ID or DisplayName", fingerprint.Fingerprint)
-		}
-		if seen[fingerprint.ID] {
-			t.Errorf("duplicate fingerprint ID %q", fingerprint.ID)
-		}
-		seen[fingerprint.ID] = true
-		if len(fingerprint.execRules) == 0 && len(fingerprint.cmdMarkers) == 0 {
-			t.Errorf("fingerprint %q can never match: no exec rules and no cmdline markers", fingerprint.ID)
-		}
-	}
-}
+// The registry's own invariants - a non-empty unique ID, a display name, and
+// enough evidence to ever match - moved into validateFingerprint when the table
+// became data, so they are enforced on load rather than checked here. See
+// TestLoadFingerprintsRejects.
 
 // TestPathRuleZeroValueNeverMatches ensures an under-specified rule cannot match
 // every path, which would misattribute unrelated processes to an agent.
