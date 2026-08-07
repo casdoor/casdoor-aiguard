@@ -68,7 +68,7 @@ function KeyInput({summary, expanded = false}) {
       <Text type="secondary" style={{fontSize: 12}}>{summary.label}</Text>
       <Tooltip
         placement="topLeft"
-        overlayStyle={{maxWidth: 680}}
+        styles={{root: {maxWidth: 680}}}
         title={(
           <span style={{display: "block", maxWidth: 640, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word"}}>
             {summary.value}
@@ -104,9 +104,12 @@ function DecisionCell({record}) {
           {record.policySet}
         </Link>
       )}
+      {/* A reason is a sentence, not a label, and clipping it to one line of a
+          narrow column leaves the first few words. Two lines usually carry the
+          whole of it, and the tooltip still has the rest. */}
       {record.reason && (
         <Tooltip title={record.reason}>
-          <Text type="danger" style={{display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+          <Text type="danger" style={{display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden"}}>
             {record.reason}
           </Text>
         </Tooltip>
@@ -355,7 +358,7 @@ export default function RecordsPage() {
     {
       title: "Decision",
       key: "decision",
-      width: 160,
+      width: 200,
       render: (_, record) => <DecisionCell record={record} />,
     },
     {
@@ -369,6 +372,10 @@ export default function RecordsPage() {
       render: (_, record) => <FeedbackCell record={record} onChanged={load} />,
     },
   ];
+
+  // Every column is fixed-width, so the horizontal scroll threshold is their
+  // sum. Deriving it keeps the two from drifting apart when a width is tuned.
+  const scrollX = columns.reduce((total, column) => total + (column.width || 0), 0);
 
   return (
     <div>
@@ -423,7 +430,7 @@ export default function RecordsPage() {
         columns={columns}
         pagination={{pageSize: 20}}
         size="small"
-        scroll={{x: 1400}}
+        scroll={{x: scrollX}}
         locale={{emptyText: "No records yet - patch an agent to start collecting them"}}
         expandable={{
           expandedRowRender: (record) => <RecordDetail record={record} />,
