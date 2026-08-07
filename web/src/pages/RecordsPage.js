@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useCallback, useEffect, useMemo, useState} from "react";
 import {Alert, Descriptions, Select, Space, Table, Tag, Tooltip, Typography, message} from "antd";
 import {BulbOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link, useHistory, useLocation} from "react-router-dom";
 import {getAgents, getRecords, setRecordFeedback} from "../backend/api";
 import {AgentIcon} from "./policySetUtil";
+import {recordsWithKeyInputs} from "./recordSummary";
 
 const {Title, Text} = Typography;
 
@@ -46,6 +47,72 @@ function prettyObject(object) {
 
 function outcomeColor(outcome) {
   return {attempted: "processing", success: "success", failure: "error", denied: "warning"}[outcome] || "default";
+}
+
+function KeyInput({summary, expanded = false}) {
+  if (!summary) {
+    return <Text type="secondary">—</Text>;
+  }
+  if (expanded) {
+    return (
+      <Space direction="vertical" size={4} style={{display: "flex"}}>
+        <Text type="secondary">{summary.label}</Text>
+        <pre style={{...codeBlockStyle, maxHeight: 160}}>{summary.value}</pre>
+      </Space>
+    );
+  }
+
+  const singleLine = summary.value.replace(/\s+/g, " ");
+  return (
+    <Space direction="vertical" size={0} style={{display: "flex", minWidth: 0}}>
+      <Text type="secondary" style={{fontSize: 12}}>{summary.label}</Text>
+      <Tooltip
+        placement="topLeft"
+        overlayStyle={{maxWidth: 680}}
+        title={(
+          <span style={{display: "block", maxWidth: 640, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word"}}>
+            {summary.value}
+          </span>
+        )}
+      >
+        <Text
+          code
+          style={{display: "block", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}
+        >
+          {singleLine}
+        </Text>
+      </Tooltip>
+    </Space>
+  );
+}
+
+function DecisionCell({record}) {
+  const verdict = !record.correctable
+    ? <Text type="secondary">logged</Text>
+    : record.isAllowed
+      ? <Tag color="green">allowed</Tag>
+      : <Tag color="red">blocked</Tag>;
+
+  return (
+    <Space direction="vertical" size={2} style={{display: "flex", minWidth: 0}}>
+      <Space size={4} wrap>
+        {verdict}
+        {record.isTriggered && <Tag color="red">policy matched</Tag>}
+      </Space>
+      {record.policySet && (
+        <Link to={`/policyhub/${encodeURIComponent(record.policySet)}`} style={{overflow: "hidden", textOverflow: "ellipsis"}}>
+          {record.policySet}
+        </Link>
+      )}
+      {record.reason && (
+        <Tooltip title={record.reason}>
+          <Text type="danger" style={{display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+            {record.reason}
+          </Text>
+        </Tooltip>
+      )}
+    </Space>
+  );
 }
 
 // A record is aiguard's account of what happened, and the verdict on it is a
@@ -124,6 +191,9 @@ function RecordDetail({record}) {
       {record.promptId && <Descriptions.Item label="Prompt ID"><Text code>{record.promptId}</Text></Descriptions.Item>}
       {record.toolUseId && <Descriptions.Item label="Tool use ID"><Text code>{record.toolUseId}</Text></Descriptions.Item>}
       {record.toolName && <Descriptions.Item label="Tool"><Text code>{record.toolName}</Text></Descriptions.Item>}
+      {record.keyInput && (
+        <Descriptions.Item label="Key input"><KeyInput summary={record.keyInput} expanded /></Descriptions.Item>
+      )}
       {record.mcpServer && (
         <Descriptions.Item label="MCP target">
           <Text code>{record.mcpServer}{record.mcpTool ? ` / ${record.mcpTool}` : ""}</Text>
@@ -133,6 +203,7 @@ function RecordDetail({record}) {
       {record.durationMs ? <Descriptions.Item label="Duration">{record.durationMs.toLocaleString()} ms</Descriptions.Item> : null}
       {record.clientIp && <Descriptions.Item label="Reported from">{record.clientIp}</Descriptions.Item>}
       {record.detail && <Descriptions.Item label="Detail">{record.detail}</Descriptions.Item>}
+      {record.isTriggered && <Descriptions.Item label="Triggered"><Tag color="red">policy matched</Tag></Descriptions.Item>}
       {record.policySet && (
         <Descriptions.Item label="Policy set">
           <Link to={`/policyhub/${encodeURIComponent(record.policySet)}`}>{record.policySet}</Link>
@@ -192,6 +263,7 @@ export default function RecordsPage() {
   ];
 
   const corrected = records.filter((record) => record.feedback).length;
+  const displayedRecords = useMemo(() => recordsWithKeyInputs(records), [records]);
 
   const setFilter = (key, value) => {
     const params = new URLSearchParams(location.search);
@@ -205,21 +277,32 @@ export default function RecordsPage() {
   };
 
   const columns = [
-    {title: "Time", dataIndex: "createdTime", key: "createdTime", render: (v) => new Date(v).toLocaleString()},
+    {title: "Time", dataIndex: "createdTime", key: "createdTime", width: 150, render: (v) => new Date(v).toLocaleString()},
     {
       title: "Agent",
       dataIndex: "agent",
       key: "agent",
-      render: (v) => (
-        <Tag color="blue" style={{display: "inline-flex", alignItems: "center", gap: 6}}>
-          <AgentIcon agent={v} size={16} fallback={<RobotOutlined />} />
-          {v}
-        </Tag>
+      width: 145,
+      render: (v, record) => (
+        <Space direction="vertical" size={2} style={{display: "flex", minWidth: 0}}>
+          <Tag color="blue" style={{display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content"}}>
+            <AgentIcon agent={v} size={16} fallback={<RobotOutlined />} />
+            {v}
+          </Tag>
+          {(record.user || record.channel) && (
+            <Tooltip title={[record.user, record.channel].filter(Boolean).join(" · ")}>
+              <Text type="secondary" style={{display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+                {[record.user, record.channel].filter(Boolean).join(" · ")}
+              </Text>
+            </Tooltip>
+          )}
+        </Space>
       ),
     },
     {
       title: "Event",
       key: "event",
+      width: 150,
       render: (_, record) => (
         <Space size={4} wrap>
           <Tag>{record.eventType}</Tag>
@@ -231,6 +314,7 @@ export default function RecordsPage() {
     {
       title: "Target / model",
       key: "target",
+      width: 150,
       render: (_, record) => {
         const target = record.mcpServer
           ? `${record.mcpServer}${record.mcpTool ? ` / ${record.mcpTool}` : ""}`
@@ -244,53 +328,35 @@ export default function RecordsPage() {
       },
     },
     {
-      title: "Actor",
-      key: "actor",
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          {record.user && <Text>{record.user}</Text>}
-          {record.channel && <Text type="secondary">{record.channel}</Text>}
-        </Space>
+      title: (
+        <Tooltip title="The most important argument for this tool call, such as a command, URL, query or file path.">
+          <span>Key input</span>
+        </Tooltip>
       ),
+      key: "keyInput",
+      width: 340,
+      render: (_, record) => <KeyInput summary={record.keyInput} />,
     },
     {
       title: "Session",
       dataIndex: "sessionKey",
       key: "sessionKey",
+      width: 170,
       ellipsis: true,
-      render: (value) => (value ? <Link to={`/records?session=${encodeURIComponent(value)}`}>{value}</Link> : null),
+      render: (value, record) => (value ? (
+        <Space direction="vertical" size={0} style={{display: "flex", minWidth: 0}}>
+          {record.title && <Text strong ellipsis>{record.title}</Text>}
+          <Link to={`/records?session=${encodeURIComponent(value)}`} style={{overflow: "hidden", textOverflow: "ellipsis"}}>
+            {value}
+          </Link>
+        </Space>
+      ) : null),
     },
     {
-      title: "Triggered",
-      dataIndex: "isTriggered",
-      key: "isTriggered",
-      render: (value) => (value ? <Tag color="red">yes</Tag> : null),
-    },
-    {
-      // Only a set that actually ruled on the operation is named, so this column
-      // stays empty for the records aiguard merely logged.
-      title: "Policy set",
-      dataIndex: "policySet",
-      key: "policySet",
-      ellipsis: true,
-      render: (value) => (value ? <Link to={`/policyhub/${encodeURIComponent(value)}`}>{value}</Link> : null),
-    },
-    {
-      title: "Verdict",
-      key: "verdict",
-      render: (_, record) => {
-        if (!record.correctable) {
-          return <Text type="secondary">logged</Text>;
-        }
-        return record.isAllowed ? <Tag color="green">allowed</Tag> : <Tag color="red">blocked</Tag>;
-      },
-    },
-    {
-      title: "Reason",
-      dataIndex: "reason",
-      key: "reason",
-      ellipsis: true,
-      render: (value) => (value ? <Text type="danger">{value}</Text> : null),
+      title: "Decision",
+      key: "decision",
+      width: 160,
+      render: (_, record) => <DecisionCell record={record} />,
     },
     {
       title: (
@@ -353,10 +419,11 @@ export default function RecordsPage() {
       {error && <Alert type="error" message={error} style={{marginBottom: 16}} />}
       <Table
         rowKey="id"
-        dataSource={records}
+        dataSource={displayedRecords}
         columns={columns}
         pagination={{pageSize: 20}}
         size="small"
+        scroll={{x: 1400}}
         locale={{emptyText: "No records yet - patch an agent to start collecting them"}}
         expandable={{
           expandedRowRender: (record) => <RecordDetail record={record} />,
