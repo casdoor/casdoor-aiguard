@@ -15,10 +15,10 @@
 package object
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -29,34 +29,21 @@ import (
 	"github.com/casdoor/casdoor-aiguard/conf"
 )
 
-// recordRingCapacity bounds the in-memory record buffer behind the Records page.
-// Full history lives in the append-only record log file, not in memory - the
-// same split the event store makes.
-const recordRingCapacity = 5000
-
+// recordStore holds the one piece of session state that is deliberately
+// never persisted: a live title override. See SetSessionTitle.
 type recordStore struct {
 	mutex         sync.RWMutex
-	records       []*Record
-	head          int
-	size          int
 	sessionTitles map[string]string
-
-	logFile *os.File
 }
 
-var records = newRecordStore()
-
-func newRecordStore() *recordStore {
-	return &recordStore{
-		records:       make([]*Record, recordRingCapacity),
-		sessionTitles: map[string]string{},
-	}
-}
+var records = &recordStore{sessionTitles: map[string]string{}}
 
 // SetSessionTitle updates the live title used by the Sessions page. A title is
 // session metadata rather than a new audited operation, so it is kept as an
-// override instead of rewriting append-only records. An empty title removes
-// the override and restores the normal fallback.
+// in-memory override instead of a database write - it does not describe what
+// happened, only what to call it right now, and is only ever as fresh as the
+// agent last reported it. An empty title removes the override and restores
+// the normal fallback.
 func SetSessionTitle(sessionKey, title string) {
 	title = strings.TrimSpace(title)
 	if len(title) > maxRecordTitleBytes {
@@ -88,53 +75,91 @@ func sessionTitlesSnapshot() map[string]string {
 	return result
 }
 
-// InitRecordLog opens the record log file for appending. Call once at startup.
-func InitRecordLog() error {
-	path := conf.GetRecordLogFile()
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+// importRecordLogOnce imports GetRecordLogFile's history into the record
+// table exactly once: only when the table is still empty, so a fresh install
+// with no legacy file is a no-op, and a database that has already been
+// migrated - or has simply been used since - is never touched again.
+//
+// Every field a line already has, including Id and CreatedTime, is trusted
+// as-is and inserted directly, not through AddRecord, so a re-parsed old
+// entry does not get a fresh identity or get re-appended anywhere.
+//
+// A record can appear more than once in the file: SetRecordFeedback used to
+// append a correction rather than rewrite the original, back when the log
+// was the append-only store of record (see this file's git history). This
+// keeps only the last line for each Id - the corrected state - so the
+// database ends up with the one row per record its schema expects.
+func importRecordLogOnce() error {
+	return importRecordLogFrom(conf.GetRecordLogFile())
+}
+
+func importRecordLogFrom(path string) error {
+	count, err := db.Count(new(Record))
 	if err != nil {
 		return err
 	}
-	records.mutex.Lock()
-	records.logFile = f
-	records.mutex.Unlock()
+	if count > 0 {
+		return nil
+	}
+
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	byId := map[string]*Record{}
+	var order []string
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxImportLine)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var record Record
+		// A malformed line must not block every record after it - skip and
+		// keep reading, the same defensiveness every agent audit parser in
+		// this codebase already applies to its own input.
+		if err := json.Unmarshal(line, &record); err != nil || record.Id == "" {
+			continue
+		}
+		if _, seen := byId[record.Id]; !seen {
+			order = append(order, record.Id)
+		}
+		byId[record.Id] = &record
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(order) == 0 {
+		return nil
+	}
+
+	imported := make([]*Record, len(order))
+	for i, id := range order {
+		imported[i] = byId[id]
+	}
+	if _, err := db.Insert(imported); err != nil {
+		return err
+	}
+	logs.Info("imported %d record(s) from the legacy record log", len(imported))
 	return nil
 }
 
-// AddRecord stores one behaviour record reported by a patched agent: into the
-// ring buffer for the Records page, and as one JSON line in the record log.
+// AddRecord stores one behaviour record reported by a patched agent.
 func AddRecord(r *Record) {
 	r.normalize()
-
-	records.mutex.Lock()
-	records.records[records.head] = r
-	records.head = (records.head + 1) % recordRingCapacity
-	if records.size < recordRingCapacity {
-		records.size++
-	}
-	f := records.logFile
-	records.mutex.Unlock()
-
-	if f != nil {
-		line, err := json.Marshal(r)
-		if err == nil {
-			if _, err := f.Write(append(line, '\n')); err != nil {
-				logs.Warn("failed to write record log: %v", err)
-			}
-		}
+	if _, err := db.Insert(r); err != nil {
+		logs.Warn("failed to insert record: %v", err)
 	}
 }
 
-// SetRecordFeedback records one operator's correction of a verdict and returns
-// the corrected record. The correction is appended to the record log as a fresh
-// line rather than rewriting the original: the log is an append-only audit
-// trail, so "this was blocked" and "a person later said it should not have
-// been" are two facts about the same operation, not one replacing the other.
+// SetRecordFeedback records one operator's correction of a verdict and
+// returns the corrected record.
 //
 // Only a record the enforcer ruled on can be corrected, because only those
 // carry the Casbin triple a self-learned rule would be written about.
@@ -143,21 +168,15 @@ func SetRecordFeedback(id string, feedback string, by string) (*Record, error) {
 		return nil, fmt.Errorf("unknown feedback %q, expected %q or %q", feedback, FeedbackAllow, FeedbackDeny)
 	}
 
-	records.mutex.Lock()
-	var record *Record
-	for i := 0; i < records.size; i++ {
-		index := (records.head - 1 - i + recordRingCapacity) % recordRingCapacity
-		if records.records[index] != nil && records.records[index].Id == id {
-			record = records.records[index]
-			break
-		}
+	var record Record
+	has, err := db.Where("id = ?", id).Get(&record)
+	if err != nil {
+		return nil, err
 	}
-	if record == nil {
-		records.mutex.Unlock()
-		return nil, fmt.Errorf("the record %q is no longer in the buffer, it may have aged out", id)
+	if !has {
+		return nil, fmt.Errorf("the record %q was not found", id)
 	}
 	if !record.IsCorrectable() {
-		records.mutex.Unlock()
 		return nil, fmt.Errorf("the record %q was only logged, not ruled on, so there is no decision to correct", id)
 	}
 
@@ -169,18 +188,10 @@ func SetRecordFeedback(id string, feedback string, by string) (*Record, error) {
 		record.FeedbackBy = by
 		record.FeedbackTime = time.Now().Format(time.RFC3339)
 	}
-	corrected := *record
-	f := records.logFile
-	records.mutex.Unlock()
-
-	if f != nil {
-		if line, err := json.Marshal(&corrected); err == nil {
-			if _, err := f.Write(append(line, '\n')); err != nil {
-				logs.Warn("failed to write record log: %v", err)
-			}
-		}
+	if _, err := db.ID(record.Id).Cols("feedback", "feedback_by", "feedback_time").Update(&record); err != nil {
+		return nil, err
 	}
-	return &corrected, nil
+	return &record, nil
 }
 
 // CorrectedRecords returns every record an operator has given feedback on,
@@ -195,8 +206,8 @@ func CorrectedRecords() []*Record {
 	return result
 }
 
-// RecordFilter narrows the Records page without changing the append-only store.
-// Every field is optional and matching is case-insensitive.
+// RecordFilter narrows the Records page. Every field is optional and
+// matching is case-insensitive.
 type RecordFilter struct {
 	Agent      string
 	EventType  string
@@ -214,38 +225,43 @@ func ListRecords(agent string, limit int) []*Record {
 // first. limit <= 0 means all. The result is never nil, so the API reports an
 // empty list rather than null.
 func ListRecordsFiltered(filter RecordFilter, limit int) []*Record {
-	records.mutex.RLock()
-	defer records.mutex.RUnlock()
+	session := db.NewSession()
+	defer session.Close()
 
-	if limit <= 0 {
-		limit = records.size
+	// Ordered by insertion (rowid), newest first, and limited before the time
+	// sort below - the same window a bounded ring buffer used to give: up to
+	// `limit` of the most recently reported matching records, not the top
+	// `limit` across all of history by timestamp.
+	session = session.OrderBy("rowid DESC")
+	if filter.Agent != "" {
+		session = session.Where("LOWER(agent) = LOWER(?)", filter.Agent)
+	}
+	if filter.EventType != "" {
+		session = session.Where("LOWER(event_type) = LOWER(?)", filter.EventType)
+	}
+	if filter.Outcome != "" {
+		session = session.Where("LOWER(outcome) = LOWER(?)", filter.Outcome)
+	}
+	if filter.SessionKey != "" {
+		session = session.Where("LOWER(session_key) = LOWER(?)", filter.SessionKey)
+	}
+	if limit > 0 {
+		session = session.Limit(limit)
 	}
 
-	// Collect in arrival order, then sort by when the events actually happened.
-	// The two differ: agents report each event on its own connection, so several
-	// events from one burst race each other here and arrive shuffled. Sorting on
-	// the agent's own timestamp is what keeps the audit trail in sequence.
-	result := make([]*Record, 0, min(limit, records.size))
-	for i := 0; i < records.size && len(result) < limit; i++ {
-		index := (records.head - 1 - i + recordRingCapacity) % recordRingCapacity
-		record := records.records[index]
-		if filter.Agent != "" && !strings.EqualFold(record.Agent, filter.Agent) {
-			continue
-		}
-		if filter.EventType != "" && !strings.EqualFold(record.EventType, filter.EventType) {
-			continue
-		}
-		if filter.Outcome != "" && !strings.EqualFold(record.Outcome, filter.Outcome) {
-			continue
-		}
-		if filter.SessionKey != "" && !strings.EqualFold(record.SessionKey, filter.SessionKey) {
-			continue
-		}
-		result = append(result, record)
+	result := []*Record{}
+	if err := session.Find(&result); err != nil {
+		logs.Warn("failed to list records: %v", err)
+		return []*Record{}
 	}
 
-	// A stable sort so records sharing a timestamp, or carrying one we cannot
-	// parse, keep their arrival order rather than being shuffled again.
+	// A stable sort so records sharing a timestamp, or carrying one this
+	// process cannot parse, keep the insertion order the query above already
+	// gave them rather than being shuffled again. Agents report each event on
+	// its own connection, so several events from one burst routinely arrive
+	// (and are inserted) out of the order they actually happened in; sorting
+	// on the agent's own timestamp is what keeps the Records page in
+	// sequence.
 	sort.SliceStable(result, func(i, j int) bool {
 		return recordTime(result[i]).After(recordTime(result[j]))
 	})
@@ -277,8 +293,8 @@ type SessionSummary struct {
 	BlockedCount int    `json:"blockedCount"`
 }
 
-// ListSessions groups every buffered record by SessionKey and summarizes each
-// group into one row, newest session first. Records without a SessionKey -
+// ListSessions groups every record by SessionKey and summarizes each group
+// into one row, newest session first. Records without a SessionKey -
 // lifecycle events some hooks emit outside any session - are not a session
 // and are skipped.
 func ListSessions() []*SessionSummary {

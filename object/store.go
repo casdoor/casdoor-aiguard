@@ -15,87 +15,95 @@
 package object
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
-	"path/filepath"
-	"sync"
 
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/casdoor/casdoor-aiguard/conf"
 )
 
-// eventRingCapacity bounds the in-memory event buffer shown on the dashboard.
-// Full history lives in the append-only audit log file, not in memory.
-const eventRingCapacity = 2000
-
-type eventStore struct {
-	mutex  sync.RWMutex
-	events []*Event
-	head   int
-	size   int
-
-	auditFile *os.File
+// importAuditLogOnce imports GetAuditLogFile's history into the event table
+// exactly once: only when the table is still empty, matching
+// importRecordLogOnce's reasoning in object/record_store.go - see its
+// comment. Unlike a record, an event is never corrected after the fact, so
+// there is no duplicate-Id case to dedupe here.
+func importAuditLogOnce() error {
+	return importAuditLogFrom(conf.GetAuditLogFile())
 }
 
-var store = newEventStore()
-
-func newEventStore() *eventStore {
-	return &eventStore{events: make([]*Event, eventRingCapacity)}
-}
-
-// InitAuditLog opens the audit log file for appending. Call once at startup.
-func InitAuditLog() error {
-	path := conf.GetAuditLogFile()
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+func importAuditLogFrom(path string) error {
+	count, err := db.Count(new(Event))
 	if err != nil {
 		return err
 	}
-	store.mutex.Lock()
-	store.auditFile = f
-	store.mutex.Unlock()
+	if count > 0 {
+		return nil
+	}
+
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var imported []*Event
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxImportLine)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil || event.Id == "" {
+			continue
+		}
+		imported = append(imported, &event)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if len(imported) == 0 {
+		return nil
+	}
+
+	if _, err := db.Insert(imported); err != nil {
+		return err
+	}
+	logs.Info("imported %d event(s) from the legacy audit log", len(imported))
 	return nil
 }
 
-// RecordEvent adds the event to the in-memory ring buffer for the dashboard
-// and appends it as one JSON line to the audit log file.
+// RecordEvent stores one intercepted, recognized (or passed-through) egress
+// request, shown in the dashboard's event stream.
 func RecordEvent(e *Event) {
-	store.mutex.Lock()
-	store.events[store.head] = e
-	store.head = (store.head + 1) % eventRingCapacity
-	if store.size < eventRingCapacity {
-		store.size++
-	}
-	f := store.auditFile
-	store.mutex.Unlock()
-
-	if f != nil {
-		line, err := json.Marshal(e)
-		if err == nil {
-			if _, err := f.Write(append(line, '\n')); err != nil {
-				logs.Warn("failed to write audit log: %v", err)
-			}
-		}
+	if _, err := db.Insert(e); err != nil {
+		logs.Warn("failed to insert event: %v", err)
 	}
 }
 
-// ListEvents returns up to `limit` most recent events, newest first. limit <= 0 means all.
+// ListEvents returns up to `limit` most recent events, newest first (by
+// insertion, matching when RecordEvent was called - not re-sorted by
+// Timestamp, since the two are the same order in practice and this avoids a
+// second sort for a field that, unlike a Record's CreatedTime, is never
+// agent-supplied text this process might fail to parse). limit <= 0 means
+// all.
 func ListEvents(limit int) []*Event {
-	store.mutex.RLock()
-	defer store.mutex.RUnlock()
-
-	if limit <= 0 || limit > store.size {
-		limit = store.size
+	session := db.NewSession()
+	defer session.Close()
+	session = session.OrderBy("rowid DESC")
+	if limit > 0 {
+		session = session.Limit(limit)
 	}
 
-	result := make([]*Event, 0, limit)
-	for i := 0; i < limit; i++ {
-		idx := (store.head - 1 - i + eventRingCapacity) % eventRingCapacity
-		result = append(result, store.events[idx])
+	result := []*Event{}
+	if err := session.Find(&result); err != nil {
+		logs.Warn("failed to list events: %v", err)
+		return []*Event{}
 	}
 	return result
 }

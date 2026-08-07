@@ -48,10 +48,7 @@ func main() {
 	if err := object.InitPolicySetState(); err != nil {
 		panic(err)
 	}
-	if err := object.InitAuditLog(); err != nil {
-		panic(err)
-	}
-	if err := object.InitRecordLog(); err != nil {
+	if err := object.InitDatabase(); err != nil {
 		panic(err)
 	}
 	if err := agentmonitor.Start(); err != nil {

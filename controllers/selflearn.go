@@ -184,8 +184,9 @@ func (c *ApiController) DeleteLearnedRule() {
 		return
 	}
 
-	// The record may well have aged out of the ring buffer long after its rule
-	// was learned, which is fine: the rule is gone either way.
+	// Best-effort: the rule is gone either way, whether or not the record it
+	// was learned from can still be found (e.g. its Id is stale or was never
+	// valid to begin with).
 	_, _ = object.SetRecordFeedback(body.Id, object.FeedbackNone, user.Name)
 
 	c.ResponseOk(learnedPolicySetOf(user))
