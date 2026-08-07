@@ -38,26 +38,26 @@ const maxRecordTitleBytes = 512
 // Records cover behaviour that never touches the network - a session reset, a
 // local tool call - which interception cannot see at all.
 type Record struct {
-	Id          string `json:"id"`
+	Id          string `json:"id" xorm:"pk"`
 	Owner       string `json:"owner"`
 	Name        string `json:"name"`
-	CreatedTime string `json:"createdTime"`
+	CreatedTime string `json:"createdTime" xorm:"index"`
 
 	// Which patched agent reported this, and from where.
-	Agent     string `json:"agent"`
+	Agent     string `json:"agent" xorm:"index"`
 	AgentPath string `json:"agentPath,omitempty"`
 	ClientIp  string `json:"clientIp,omitempty"`
 
 	// What happened. EventType and Action mirror the agent's own event
 	// vocabulary (for OpenClaw, "message"/"received"), so a record stays
 	// recognizable to someone reading the agent's documentation.
-	EventType string `json:"eventType"`
+	EventType string `json:"eventType" xorm:"index"`
 	Action    string `json:"action"`
 	// Outcome is a normalized result shared by agent hook records:
 	// attempted, success, failure or denied. It stays empty for lifecycle
 	// events where a result would be misleading.
-	Outcome    string `json:"outcome,omitempty"`
-	SessionKey string `json:"sessionKey,omitempty"`
+	Outcome    string `json:"outcome,omitempty" xorm:"index"`
+	SessionKey string `json:"sessionKey,omitempty" xorm:"index"`
 	User       string `json:"user,omitempty"`
 	Channel    string `json:"channel,omitempty"`
 

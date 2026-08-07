@@ -213,9 +213,9 @@ size. The Sessions page uses the title Claude Desktop keeps in the adjacent
 `cliSessionId` is never used as the Cowork session identity. Generated titles
 and later renames are picked up without waiting for another audit event. The
 monitor parses only the title and outer session identifier, and keeps the title
-as live in-memory metadata for the Sessions page instead of copying it into
-behaviour records or the append-only record log. The initial message and every
-other conversation field in that file remain untouched and are never stored by
+as live in-memory metadata for the Sessions page instead of copying it into a
+behaviour record or the database. The initial message and every other
+conversation field in that file remain untouched and are never stored by
 aiguard.
 
 This is post-execution audit and cannot block a call. Independent Desktop Chat,
@@ -242,8 +242,8 @@ and cannot block a call or report individual HTTP retries.
 ## Sessions
 
 The Sessions page groups records by `sessionKey` - one row per agent run - so
-you can find a session instead of scrolling a flat record log. Click a session
-to open its records, filtered.
+you can find a session instead of scrolling through every record one at a
+time. Click a session to open its records, filtered.
 
 Where an agent reports one, the title shown is the agent's own short label for
 the session - for Claude Code, the same title `claude --resume` would show,
@@ -388,8 +388,9 @@ overridden by an environment variable of the same name):
 | `autoTransparentProxy` | `true` | on Linux+root, auto-install the iptables redirect on start and remove it on exit |
 | `caCertDir` | `./certs` | where the local CA cert/key are stored |
 | `policyFile` | `./conf/policy.yaml` | interception rule file |
-| `auditLogFile` | `./logs/audit.log` | append-only JSONL audit log of intercepted events |
-| `recordLogFile` | `./logs/record.log` | append-only JSONL log of agent behaviour records |
+| `databaseFile` | `./data/aiguard.db` | local SQLite database backing records and events (Records, Sessions, dashboard) |
+| `auditLogFile` | `./logs/audit.log` | legacy append-only JSONL audit log; read once to import pre-upgrade events into `databaseFile`, no longer written to |
+| `recordLogFile` | `./logs/record.log` | legacy append-only JSONL record log; read once to import pre-upgrade records into `databaseFile`, no longer written to |
 | `patchStateDir` | `./data/patches` | patch manifests and file backups used by file-based patchers |
 | `recordsIngestUrl` | *(empty)* | endpoint baked into installed hooks; set it when the agent runs in a container or WSL |
 | `casdoorEndpoint` | `http://localhost:8000` | Casdoor base URL |

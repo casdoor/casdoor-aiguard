@@ -44,6 +44,11 @@ commentsRouter*.go
 data/patches
 policyset_state.json
 
+# aiguard's local database (records + events) and SQLite's WAL sidecar files
+data/aiguard.db
+data/aiguard.db-shm
+data/aiguard.db-wal
+
 # Python bytecode from the embedded Hermes observer plugin
 __pycache__/
 *.pyc

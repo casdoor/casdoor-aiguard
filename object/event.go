@@ -28,21 +28,25 @@ import (
 const maxCaptureBytes = 256 * 1024
 
 // Event is one intercepted, recognized (or passed-through) egress request,
-// shown in the dashboard's event stream and written to the audit log. Beyond
+// shown in the dashboard's event stream and stored in the database. Beyond
 // the decision, it captures the raw HTTP exchange (method, path, query, request
 // body, and the upstream response) so an operator can see exactly what was sent
 // and what came back.
 type Event struct {
-	Id            string              `json:"id"`
-	Timestamp     time.Time           `json:"timestamp"`
-	SourcePid     int                 `json:"sourcePid,omitempty"`
-	SourceProcess string              `json:"sourceProcess,omitempty"`
-	Agent         string              `json:"agent,omitempty"`
-	Destination   string              `json:"destination"`
-	Recognizer    string              `json:"recognizer,omitempty"`
-	Intent        *recognizers.Intent `json:"intent,omitempty"`
-	Decision      Action              `json:"decision"`
-	Reason        string              `json:"reason"`
+	Id            string    `json:"id" xorm:"pk"`
+	Timestamp     time.Time `json:"timestamp" xorm:"index"`
+	SourcePid     int       `json:"sourcePid,omitempty"`
+	SourceProcess string    `json:"sourceProcess,omitempty"`
+	Agent         string    `json:"agent,omitempty" xorm:"index"`
+	Destination   string    `json:"destination"`
+	Recognizer    string    `json:"recognizer,omitempty"`
+	// Intent is stored as a JSON blob rather than its own columns - it is a
+	// nested, recognizer-specific shape (see recognizers.Intent) with no
+	// query of its own, so there is nothing to index and no reason to spread
+	// it across the schema.
+	Intent   *recognizers.Intent `json:"intent,omitempty" xorm:"json"`
+	Decision Action              `json:"decision"`
+	Reason   string              `json:"reason"`
 
 	// HTTP exchange capture.
 	Method         string `json:"method,omitempty"`

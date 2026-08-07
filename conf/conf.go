@@ -103,6 +103,8 @@ func GetPolicyFile() string {
 	return file
 }
 
+// GetAuditLogFile is the legacy append-only log of intercepted-traffic
+// events. See GetRecordLogFile's comment - the same applies here.
 func GetAuditLogFile() string {
 	file := GetConfigString("auditLogFile")
 	if file == "" {
@@ -111,12 +113,27 @@ func GetAuditLogFile() string {
 	return file
 }
 
-// GetRecordLogFile is the append-only log of behaviour records reported by
-// patched agents, the counterpart to the intercepted-traffic audit log.
+// GetRecordLogFile is the legacy append-only log of behaviour records
+// reported by patched agents, the counterpart to GetAuditLogFile. Both now
+// exist only as a one-time import source for GetDatabaseFile - see
+// object.InitDatabase - and are no longer written to.
 func GetRecordLogFile() string {
 	file := GetConfigString("recordLogFile")
 	if file == "" {
 		file = "./logs/record.log"
+	}
+	return file
+}
+
+// GetDatabaseFile is aiguard's local SQLite database: records and events both
+// live here now, replacing the in-memory ring buffer + append-only file each
+// used before (see object.InitDatabase). A real database persists correctly
+// by construction, so restarting no longer needs any of the "replay the log
+// back into memory" logic that split ever needed.
+func GetDatabaseFile() string {
+	file := GetConfigString("databaseFile")
+	if file == "" {
+		file = "./data/aiguard.db"
 	}
 	return file
 }
