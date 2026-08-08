@@ -1,6 +1,6 @@
 name: casdoor-aiguard-observer
-version: "1.0.0"
-description: "Metadata-only behaviour audit for Casdoor AIGuard."
+version: "1.1.0"
+description: "Behaviour audit with redacted tool inputs for Casdoor AIGuard."
 author: Casdoor
 kind: standalone
 # "provides_hooks" is the key Hermes' manifest parser reads; the callbacks

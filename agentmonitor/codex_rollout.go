@@ -33,17 +33,22 @@ type codexRolloutEntry struct {
 }
 
 type codexRolloutPayload struct {
-	ID         string `json:"id"`
-	Originator string `json:"originator"`
-	TurnID     string `json:"turn_id"`
-	Model      string `json:"model"`
-	Type       string `json:"type"`
-	Role       string `json:"role"`
-	Name       string `json:"name"`
-	CallID     string `json:"call_id"`
-	Status     string `json:"status"`
-	ExitCode   int    `json:"exit_code"`
-	Content    []struct {
+	ID            string         `json:"id"`
+	Originator    string         `json:"originator"`
+	TurnID        string         `json:"turn_id"`
+	Model         string         `json:"model"`
+	Type          string         `json:"type"`
+	Role          string         `json:"role"`
+	Name          string         `json:"name"`
+	CallID        string         `json:"call_id"`
+	Status        string         `json:"status"`
+	ExitCode      int            `json:"exit_code"`
+	Arguments     any            `json:"arguments"`
+	Input         string         `json:"input"`
+	Action        map[string]any `json:"action"`
+	Query         string         `json:"query"`
+	RevisedPrompt string         `json:"revised_prompt"`
+	Content       []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -58,10 +63,11 @@ type codexRolloutPayload struct {
 		ContextWindow json.Number `json:"model_context_window"`
 	} `json:"info"`
 	Invocation struct {
-		Server string `json:"server"`
-		Tool   string `json:"tool"`
+		Server    string         `json:"server"`
+		Tool      string         `json:"tool"`
+		Arguments map[string]any `json:"arguments"`
 	} `json:"invocation"`
-	Result map[string]json.RawMessage `json:"result"`
+	Result any `json:"result"`
 }
 
 func parseCodexHeader(line []byte) codexHeaderMeta {
@@ -101,6 +107,13 @@ func parseCodexRolloutLine(line []byte, cursor *codexCursor, claim *codexClaim) 
 			return codexFinishTool(payload, cursor, claim, when, "exec")
 		case "mcp_tool_call_end":
 			return codexFinishTool(payload, cursor, claim, when, "mcp")
+		case "web_search_end":
+			payload.Status = "completed"
+			if payload.Action == nil {
+				payload.Action = map[string]any{}
+			}
+			payload.Action["query"] = payload.Query
+			return codexHostedTool(payload, "web_search", cursor, claim, when)
 		}
 	case "response_item":
 		switch payload.Type {
@@ -108,9 +121,14 @@ func parseCodexRolloutLine(line []byte, cursor *codexCursor, claim *codexClaim) 
 			return codexMessageRecord(payload, cursor, claim, when)
 		case "function_call", "custom_tool_call":
 			codexRememberTool(payload, cursor, when)
-		case "function_call_output", "custom_tool_call_output", "tool_search_output":
+		case "function_call_output":
+			if call, exists := cursor.Pending[payload.CallID]; exists && call.Name == "exec_command" {
+				return nil
+			}
 			return codexFinishTool(payload, cursor, claim, when, "")
-		case "tool_search_call", "web_search_call", "image_generation_call", "local_shell_call":
+		case "custom_tool_call_output", "tool_search_output":
+			return codexFinishTool(payload, cursor, claim, when, "")
+		case "tool_search_call", "image_generation_call", "local_shell_call":
 			return codexHostedTool(payload, strings.TrimSuffix(payload.Type, "_call"), cursor, claim, when)
 		}
 	}
@@ -208,8 +226,45 @@ func codexRememberTool(payload codexRolloutPayload, cursor *codexCursor, when ti
 	if payload.CallID != "" && payload.Name != "" {
 		cursor.Pending[payload.CallID] = codexPendingCall{
 			Name: payload.Name, StartedAt: when, TurnID: cursor.TurnID,
+			Object: codexToolObject(payload, payload.Name),
 		}
 	}
+}
+
+func codexToolObject(payload codexRolloutPayload, toolName string) string {
+	var input any
+	switch arguments := payload.Arguments.(type) {
+	case string:
+		var decoded map[string]any
+		if json.Unmarshal([]byte(arguments), &decoded) == nil {
+			input = decoded
+		}
+	case map[string]any:
+		input = arguments
+	}
+	if payload.Input != "" {
+		value := payload.Input
+		if toolName == "apply_patch" || strings.Contains(value, "tools.apply_patch(") {
+			value = "[OMITTED: patch content]"
+		}
+		input = map[string]any{"input": value}
+	}
+	if payload.Action != nil {
+		input = payload.Action
+	}
+	if payload.RevisedPrompt != "" {
+		input = map[string]any{"prompt": payload.RevisedPrompt}
+	}
+	if payload.Invocation.Arguments != nil {
+		input = payload.Invocation.Arguments
+	}
+	if input == nil {
+		return ""
+	}
+	return auditutil.EncodeBoundedJSON(
+		map[string]any{"input": auditutil.SanitizeToolInput(toolName, input)},
+		64*1024,
+	)
 }
 
 func codexHostedTool(
@@ -220,14 +275,22 @@ func codexHostedTool(
 	when time.Time,
 ) []*object.Record {
 	outcome, terminal := codexStatus(payload.Status)
-	if payload.CallID == "" {
+	callID := payload.CallID
+	if callID == "" {
+		callID = payload.ID
+	}
+	if callID == "" {
 		if !terminal || !codexClaimMatches(cursor, claim) {
 			return nil
 		}
-		call := codexPendingCall{Name: name, StartedAt: when, TurnID: cursor.TurnID}
+		call := codexPendingCall{
+			Name: name, StartedAt: when, TurnID: cursor.TurnID,
+			Object: codexToolObject(payload, name),
+		}
 		return codexToolPair(cursor, claim, "", call, when, outcome)
 	}
-	if _, exists := cursor.Pending[payload.CallID]; !exists {
+	payload.CallID = callID
+	if _, exists := cursor.Pending[callID]; !exists {
 		payload.Name = name
 		codexRememberTool(payload, cursor, when)
 	}
@@ -246,7 +309,14 @@ func codexFinishTool(
 ) []*object.Record {
 	call, found := cursor.Pending[payload.CallID]
 	if !found {
-		return nil
+		if kind != "mcp" || payload.CallID == "" || payload.Invocation.Server == "" || payload.Invocation.Tool == "" {
+			return nil
+		}
+		call = codexPendingCall{
+			Name:      "mcp__" + payload.Invocation.Server + "__" + payload.Invocation.Tool,
+			StartedAt: when,
+			TurnID:    cursor.TurnID,
+		}
 	}
 	delete(cursor.Pending, payload.CallID)
 	if !codexClaimMatches(cursor, claim) {
@@ -260,8 +330,13 @@ func codexFinishTool(
 		if payload.Invocation.Server != "" && payload.Invocation.Tool != "" {
 			call.Name = "mcp__" + payload.Invocation.Server + "__" + payload.Invocation.Tool
 		}
-		if _, failed := payload.Result["Err"]; failed {
-			outcome = "failure"
+		if object := codexToolObject(payload, call.Name); object != "" {
+			call.Object = object
+		}
+		if result, ok := payload.Result.(map[string]any); ok {
+			if _, failed := result["Err"]; failed {
+				outcome = "failure"
+			}
 		}
 	}
 	return codexToolPair(cursor, claim, payload.CallID, call, when, outcome)
@@ -292,6 +367,9 @@ func codexToolRecord(
 	record := codexBaseRecord(cursor, claim, when)
 	record.EventType, record.Action, record.Outcome = "tool", action, outcome
 	record.ToolUseId, record.ToolName, record.PromptId = callID, call.Name, call.TurnID
+	if action == "call" {
+		record.Object = call.Object
+	}
 	if server, tool, ok := auditutil.ParseMcpTool(call.Name, "mcp__"); ok {
 		record.EventType, record.McpServer, record.McpTool = "mcp", server, tool
 	}
@@ -306,7 +384,7 @@ func codexToolRecord(
 
 func codexStatus(status string) (string, bool) {
 	switch strings.ToLower(status) {
-	case "failed", "error", "cancelled":
+	case "failed", "error", "cancelled", "incomplete":
 		return "failure", true
 	case "denied":
 		return "denied", true

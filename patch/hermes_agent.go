@@ -29,7 +29,7 @@ import (
 
 const (
 	hermesPluginName       = "casdoor-aiguard-observer"
-	hermesPluginVersion    = "1.0.0"
+	hermesPluginVersion    = "1.1.0"
 	hermesConfigSchema     = 1
 	minHermesPluginVersion = "0.19.0"
 )
@@ -161,10 +161,10 @@ func (p hermesPatcher) Unpatch(target Target) error {
 // so the Web UI does not need a branch of its own for how Hermes loads plugins.
 func (hermesPatcher) PatchNotice(patched bool) (string, string) {
 	if patched {
-		return "Removes the metadata-only observer from the default Hermes profile and drops its entry from plugins.enabled. Nothing else in config.yaml changes.",
+		return "Removes the behaviour observer from the default Hermes profile and drops its entry from plugins.enabled. Nothing else in config.yaml changes.",
 			"Restart running Hermes processes to unload it."
 	}
-	return "Installs a metadata-only observer in the default Hermes profile and adds it to plugins.enabled. Named profiles are left alone.",
+	return "Installs a behaviour observer with redacted tool inputs in the default Hermes profile and adds it to plugins.enabled. Named profiles are left alone.",
 		"Restart running Hermes processes to load it."
 }
 
@@ -214,7 +214,7 @@ func (p hermesPatcher) Status(target Target) (Status, error) {
 	return Status{
 		Patched: true,
 		Detail: fmt.Sprintf(
-			"metadata-only observer installed in %s; start a new Hermes process or restart a running one to load it",
+			"behaviour observer installed in %s; start a new Hermes process or restart a running one to load it",
 			layout.home,
 		),
 	}, nil

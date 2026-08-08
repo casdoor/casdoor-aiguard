@@ -75,7 +75,7 @@ agent, and one record on the Records page.
   │                 • OpenClaw       → a hook in its hook directory        │
   │                 • Claude Desktop → aiguard registered as an MCP server │
   │                 • Claude Code    → command hooks in shared settings    │
-  │                 • Hermes Agent   → a metadata-only user plugin         │
+  │                 • Hermes Agent   → a user-level observer plugin        │
   │               Windows Desktop also tails Cowork audit.jsonl files      │
   │               shared settings are edited without replacing user data   │
   │  audit integrations POST /api/records; enforcement integrations use    │
@@ -147,7 +147,7 @@ patcher (`patch/`):
 | **OpenClaw** | a hook installed into its hook directory + a config entry | supported |
 | **Claude Desktop** | MCP server registration; on Windows, Cowork `audit.jsonl` plus the shared Claude Code hooks | supported |
 | **Claude Code** | async command hooks in `~/.claude/settings.json` | supported (audit only) |
-| **Hermes Agent** | metadata-only observer plugin in the default Hermes profile | supported (audit only) |
+| **Hermes Agent** | observer plugin in the default Hermes profile | supported (audit only) |
 | **ChatGPT Desktop (Codex)** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS) |
 | **Codex CLI** | `$CODEX_HOME/sessions/**/rollout-*.jsonl` | supported (audit only; Windows/macOS/Linux) |
 | Cursor, Cursor Agent, Windsurf | — | discovered, not instrumented yet |
@@ -189,11 +189,12 @@ change made while patched survive both.
 
 The observer uses Hermes' API, tool, session and subagent lifecycle hooks.
 LLM records contain provider/model, counts, token usage, status and duration;
-tool and MCP records contain names, correlation IDs, status and duration.
-Prompts, responses, reasoning, tool arguments/results, error text and subagent
-goal/summary text are never serialized. Delivery is asynchronous, bounded and
-fail-open: an unavailable aiguard or a full queue can lose audit records but
-cannot delay or change the agent's operation.
+tool and MCP records also contain redacted, size-bounded arguments so Records
+can surface the command, URL, query, path or other key input. LLM request and
+response bodies, reasoning, tool results, error text and subagent goal/summary
+text are never serialized. Delivery is asynchronous, bounded and fail-open:
+an unavailable aiguard or a full queue can lose audit records but cannot delay
+or change the agent's operation.
 
 ### Claude Desktop Cowork on Windows
 
@@ -235,9 +236,10 @@ start at EOF on first Patch and offsets survive AIGuard restarts. Codex CLI
 runs started with `--ephemeral` do not write rollout files and cannot be
 audited by this integration.
 
-Records contain interaction lengths, available token counts, and Tool/MCP
-identity, result and duration. Rollout monitoring is post-execution audit only
-and cannot block a call or report individual HTTP retries.
+Records contain interaction lengths, available token counts, Tool/MCP
+identity, result, duration, and redacted, size-bounded tool inputs. Tool output
+and generated image data are not stored. Rollout monitoring is post-execution
+audit only and cannot block a call or report individual HTTP retries.
 
 ## Sessions
 
