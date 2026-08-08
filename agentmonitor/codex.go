@@ -49,6 +49,7 @@ type codexPendingCall struct {
 	Name      string    `json:"name"`
 	StartedAt time.Time `json:"startedAt"`
 	TurnID    string    `json:"turnId,omitempty"`
+	Object    string    `json:"object,omitempty"`
 }
 
 type codexCursor struct {

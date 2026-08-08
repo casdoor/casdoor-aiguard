@@ -32,20 +32,21 @@ import (
 const openAgentRecordTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 type openAgentAuditEntry struct {
-	Timestamp       string `json:"timestamp"`
-	SessionID       string `json:"sessionId"`
-	Type            string `json:"type"`
-	Tool            string `json:"tool"`
-	Server          string `json:"server"`
-	Model           string `json:"model"`
-	ArgumentsLength int    `json:"argumentsLength"`
-	ContentLength   int    `json:"contentLength"`
-	Effect          string `json:"effect"`
-	Reason          string `json:"reason"`
-	Rule            string `json:"rule"`
-	Outcome         string `json:"outcome"`
-	Action          string `json:"action"`
-	DurationMs      int64  `json:"durationMs"`
+	Timestamp       string         `json:"timestamp"`
+	SessionID       string         `json:"sessionId"`
+	Type            string         `json:"type"`
+	Tool            string         `json:"tool"`
+	Server          string         `json:"server"`
+	Model           string         `json:"model"`
+	Arguments       map[string]any `json:"arguments"`
+	ArgumentsLength int            `json:"argumentsLength"`
+	ContentLength   int            `json:"contentLength"`
+	Effect          string         `json:"effect"`
+	Reason          string         `json:"reason"`
+	Rule            string         `json:"rule"`
+	Outcome         string         `json:"outcome"`
+	Action          string         `json:"action"`
+	DurationMs      int64          `json:"durationMs"`
 }
 
 func parseOpenAgentAuditLine(line []byte, cursor *openAgentCursor, claim *openAgentClaim) []*object.Record {
@@ -91,6 +92,9 @@ func openAgentToolRecord(entry openAgentAuditEntry, cursor *openAgentCursor, cla
 	}
 
 	body := map[string]any{}
+	if len(entry.Arguments) > 0 {
+		body["arguments"] = auditutil.SanitizeToolInput(record.ToolName, entry.Arguments)
+	}
 	if entry.ArgumentsLength > 0 {
 		body["argumentsLength"] = entry.ArgumentsLength
 	}

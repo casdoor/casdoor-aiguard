@@ -1,8 +1,8 @@
-"""Casdoor AIGuard's metadata-only observer for Hermes Agent.
+"""Casdoor AIGuard's behaviour observer for Hermes Agent.
 
 This module intentionally never serializes prompts, responses, reasoning,
-tool arguments, tool results, or subagent text. Hook callbacks enqueue small
-records without waiting for the AIGuard HTTP endpoint.
+tool results, or subagent text. Tool arguments are redacted and bounded before
+hook callbacks enqueue records without waiting for the AIGuard HTTP endpoint.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import atexit
 import json
 import logging
 import queue
+import re
 import threading
 import urllib.request
 from pathlib import Path
@@ -23,6 +24,32 @@ _QUEUE: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1024)
 _STOP = threading.Event()
 _SENDER: threading.Thread | None = None
 _REGISTER_LOCK = threading.Lock()
+_MAX_OBJECT_BYTES = 64 * 1024
+
+_CREDENTIAL_PATTERN = re.compile(
+    r"\b(?:sk-(?:ant-|proj-)?[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|"
+    r"github_pat_[a-z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9a-z_-]{30,}|"
+    r"xox[baprs]-[0-9a-z-]{12,}|eyJ[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\."
+    r"[a-z0-9_-]{10,})\b",
+    re.IGNORECASE,
+)
+_BEARER_PATTERN = re.compile(r"(bearer\s+)[a-z0-9._~+/=-]{12,}", re.IGNORECASE)
+_PRIVATE_KEY_PATTERN = re.compile(
+    r"-----BEGIN [^-\n]*PRIVATE KEY-----.*?-----END [^-\n]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_SENSITIVE_KEY_MARKERS = (
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "credential",
+    "privatekey",
+    "apikey",
+    "accesskey",
+    "authorization",
+    "cookie",
+)
 
 _USAGE_KEYS = {
     "input_tokens",
@@ -102,6 +129,52 @@ def _metadata(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value not in ("", None)}
 
 
+def _sanitize_value(key: str, value: Any) -> Any:
+    normalized_key = key.lower().replace("_", "").replace("-", "").replace(".", "")
+    if any(marker in normalized_key for marker in _SENSITIVE_KEY_MARKERS):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {child_key: _sanitize_value(child_key, child) for child_key, child in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value("", child) for child in value]
+    if isinstance(value, str):
+        value = _PRIVATE_KEY_PATTERN.sub("[REDACTED PRIVATE KEY]", value)
+        value = _BEARER_PATTERN.sub(r"\1[REDACTED]", value)
+        return _CREDENTIAL_PATTERN.sub("[REDACTED]", value)
+    return value
+
+
+def _sensitive_path(file_path: str) -> bool:
+    normalized = file_path.lower().replace("\\", "/")
+    base = normalized.rsplit("/", 1)[-1]
+    if base.startswith(".env") and base not in {".env.example", ".env.sample", ".env.template"}:
+        return True
+    if normalized.startswith(".ssh/") or "/.ssh/" in normalized:
+        return True
+    if normalized == ".aws/credentials" or normalized.endswith("/.aws/credentials"):
+        return True
+    if base in {".npmrc", ".pypirc", "credentials", "id_rsa", "id_ed25519"}:
+        return True
+    return base.endswith((".pem", ".key"))
+
+
+def _sanitize_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _sanitize_value("", arguments)
+    normalized_tool = tool_name.lower()
+    if (normalized_tool == "patch" or normalized_tool.endswith("__patch")) and "patch" in sanitized:
+        sanitized["patch"] = "[OMITTED: patch content]"
+    sensitive_write = normalized_tool in {"write", "edit", "write_file", "edit_file", "patch"} or normalized_tool.endswith(
+        ("__write_file", "__edit_file", "__patch")
+    )
+    file_path = arguments.get("path", "") or arguments.get("file_path", "")
+    if not sensitive_write or not _sensitive_path(file_path):
+        return sanitized
+    for key in ("content", "old_string", "new_string"):
+        if key in sanitized:
+            sanitized[key] = "[REDACTED: sensitive file content]"
+    return sanitized
+
+
 def _usage(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
@@ -148,9 +221,24 @@ def _base_record(
     if outcome:
         record["outcome"] = outcome
     if metadata:
-        record["object"] = json.dumps(
+        encoded = json.dumps(
             metadata, ensure_ascii=False, separators=(",", ":"), sort_keys=True
         )
+        encoded_bytes = encoded.encode("utf-8")
+        if len(encoded_bytes) > _MAX_OBJECT_BYTES:
+            encoded = json.dumps(
+                {
+                    "truncated": True,
+                    "originalBytes": len(encoded_bytes),
+                    "preview": encoded_bytes[: _MAX_OBJECT_BYTES // 3].decode(
+                        "utf-8", errors="ignore"
+                    ),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        record["object"] = encoded
     return {key: value for key, value in record.items() if value not in ("", None)}
 
 
@@ -300,6 +388,8 @@ def _tool_record(action: str, outcome: str, values: dict[str, Any]) -> dict[str,
         errorMessageLength=_length(error_message) if error_message is not None else None,
         middlewareStageCount=_count(values.get("middleware_trace")),
     )
+    if action == "call":
+        data["arguments"] = _sanitize_tool_arguments(tool_name, values["args"])
     record = _base_record(event_type, action, outcome, values, data)
     record["toolName"] = tool_name
     record["toolUseId"] = _text(values.get("tool_call_id"))
