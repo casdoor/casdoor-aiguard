@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, {useEffect, useState} from "react";
-import {Alert, Button, Popconfirm, Space, Table, Tag, Tooltip, Typography, message} from "antd";
+import React, {useEffect, useRef, useState} from "react";
+import {Alert, Button, Form, Input, Modal, Popconfirm, Radio, Space, Spin, Table, Tag, Tooltip, Typography, message} from "antd";
 import {ReloadOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link} from "react-router-dom";
-import {getAgents, patchAgent, unpatchAgent} from "../backend/api";
+import {getAgentLlmApi, getAgents, patchAgent, unpatchAgent, updateAgentLlmApi} from "../backend/api";
 import {AgentIcon} from "./policySetUtil";
 
 const {Title, Text} = Typography;
@@ -29,6 +29,12 @@ export default function AgentsPage() {
   const [error, setError] = useState(null);
   // The key of the row whose patch is in flight, so only its button spins.
   const [busyKey, setBusyKey] = useState(null);
+  const [apiRecord, setApiRecord] = useState(null);
+  const [apiConfig, setApiConfig] = useState(null);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [apiSaving, setApiSaving] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const apiRequestId = useRef(0);
 
   const load = () => {
     setLoading(true);
@@ -58,6 +64,75 @@ export default function AgentsPage() {
       .finally(() => setBusyKey(null));
   };
 
+  const openApiConfig = (record) => {
+    const requestId = ++apiRequestId.current;
+    const target = {agentId: record.agentId, path: record.path, owner: record.owner};
+    setApiRecord(record);
+    setApiConfig(null);
+    setApiError(null);
+    setApiLoading(true);
+    getAgentLlmApi(target)
+      .then((config) => {
+        if (apiRequestId.current === requestId) {
+          setApiConfig({
+            mode: config.mode || "official",
+            baseUrl: config.baseUrl || "",
+            model: config.model || "",
+            hasApiKey: Boolean(config.hasApiKey),
+            apiKey: "",
+          });
+        }
+      })
+      .catch((err) => {
+        if (apiRequestId.current === requestId) {
+          setApiError(err.message);
+        }
+      })
+      .finally(() => {
+        if (apiRequestId.current === requestId) {
+          setApiLoading(false);
+        }
+      });
+  };
+
+  const saveApiConfig = () => {
+    const baseUrl = apiConfig.baseUrl.trim();
+    const model = apiConfig.model.trim();
+    const apiKey = apiConfig.apiKey.trim();
+    const isCodex = apiRecord.agentId === "codex" || apiRecord.agentId === "codex-cli";
+
+    if (apiConfig.mode === "relay" && !baseUrl) {
+      message.error("API endpoint is required for relay mode");
+      return;
+    }
+    if (apiConfig.mode === "relay" && isCodex && !model) {
+      message.error("Model is required for Codex relay mode");
+      return;
+    }
+    if (apiConfig.mode === "relay" && !apiConfig.hasApiKey && !apiKey) {
+      message.error("API key is required the first time relay mode is configured");
+      return;
+    }
+
+    setApiSaving(true);
+    setApiError(null);
+    updateAgentLlmApi({
+      agentId: apiRecord.agentId,
+      path: apiRecord.path,
+      owner: apiRecord.owner,
+      mode: apiConfig.mode,
+      baseUrl,
+      model,
+      apiKey,
+    })
+      .then(() => {
+        message.success(`Saved ${apiRecord.name} API configuration. Start a new session or restart ${apiRecord.name} to load it.`);
+        setApiRecord(null);
+      })
+      .catch((err) => setApiError(err.message))
+      .finally(() => setApiSaving(false));
+  };
+
   const renderStatus = (_, record) => {
     if (!record.supported) {
       return <Tooltip title={record.detail}><Tag>Not supported</Tag></Tooltip>;
@@ -67,25 +142,31 @@ export default function AgentsPage() {
   };
 
   const renderAction = (_, record) => {
-    if (!record.supported) {
-      return <Button size="small" disabled>Patch</Button>;
+    let patchButton = <Button size="small" disabled>Patch</Button>;
+    if (record.supported) {
+      const button = (
+        <Button size="small" type={record.patched ? "default" : "primary"} loading={busyKey === rowKey(record)}>
+          {record.patched ? "Unpatch" : "Patch"}
+        </Button>
+      );
+      const description = [record.notice, record.followup].filter(Boolean).join(" ");
+      patchButton = (
+        <Popconfirm
+          title={record.patched ? `Unpatch ${record.name}?` : `Patch ${record.name}?`}
+          description={description}
+          okText={record.patched ? "Unpatch" : "Patch"}
+          onConfirm={() => togglePatch(record)}
+        >
+          {button}
+        </Popconfirm>
+      );
     }
 
-    const button = (
-      <Button size="small" type={record.patched ? "default" : "primary"} loading={busyKey === rowKey(record)}>
-        {record.patched ? "Unpatch" : "Patch"}
-      </Button>
-    );
-    const description = [record.notice, record.followup].filter(Boolean).join(" ");
     return (
-      <Popconfirm
-        title={record.patched ? `Unpatch ${record.name}?` : `Patch ${record.name}?`}
-        description={description}
-        okText={record.patched ? "Unpatch" : "Patch"}
-        onConfirm={() => togglePatch(record)}
-      >
-        {button}
-      </Popconfirm>
+      <Space size={8}>
+        {patchButton}
+        {record.apiConfigurable && <Button size="small" onClick={() => openApiConfig(record)}>Configure API</Button>}
+      </Space>
     );
   };
 
@@ -130,6 +211,73 @@ export default function AgentsPage() {
         locale={{emptyText: "No supported agents found"}}
         size="small"
       />
+      <Modal
+        title={apiRecord ? `Configure API - ${apiRecord.name}` : "Configure API"}
+        open={Boolean(apiRecord)}
+        okText="Save"
+        confirmLoading={apiSaving}
+        okButtonProps={{disabled: apiLoading || !apiConfig}}
+        onOk={saveApiConfig}
+        onCancel={() => {
+          if (!apiSaving) {
+            apiRequestId.current++;
+            setApiRecord(null);
+          }
+        }}
+      >
+        {apiLoading && <div style={{padding: 32, textAlign: "center"}}><Spin /></div>}
+        {apiError && <Alert type="error" message={apiError} style={{marginBottom: 16}} />}
+        {apiRecord && apiConfig && (
+          <Form layout="vertical">
+            <Form.Item label="Mode">
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                value={apiConfig.mode}
+                options={[
+                  {label: "Official", value: "official"},
+                  {label: "Relay", value: "relay"},
+                ]}
+                onChange={(e) => setApiConfig({...apiConfig, mode: e.target.value})}
+              />
+            </Form.Item>
+            {apiConfig.mode === "relay" && (
+              <>
+                <Form.Item label="API endpoint" required>
+                  <Input
+                    value={apiConfig.baseUrl}
+                    placeholder="https://api.example.com"
+                    onChange={(e) => setApiConfig({...apiConfig, baseUrl: e.target.value})}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="API key"
+                  required={!apiConfig.hasApiKey}
+                  extra={apiConfig.hasApiKey ? "A key is already configured. Leave this blank to keep it." : "Enter the API key for this relay."}
+                >
+                  <Input.Password
+                    value={apiConfig.apiKey}
+                    autoComplete="new-password"
+                    placeholder={apiConfig.hasApiKey ? "Leave blank to keep the current key" : "Enter API key"}
+                    onChange={(e) => setApiConfig({...apiConfig, apiKey: e.target.value})}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="Model"
+                  required={apiRecord.agentId === "codex" || apiRecord.agentId === "codex-cli"}
+                  extra={apiRecord.agentId === "claude-code" ? "Optional for Claude Code." : undefined}
+                >
+                  <Input
+                    value={apiConfig.model}
+                    placeholder="Model name"
+                    onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
+                  />
+                </Form.Item>
+              </>
+            )}
+          </Form>
+        )}
+      </Modal>
     </div>
   );
 }

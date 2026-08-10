@@ -57,6 +57,21 @@ export function getAgents() {
   return request("/api/agents");
 }
 
+// Reads only the active API configuration for one discovered agent. The
+// response says whether a key exists, but never includes the key itself.
+export function getAgentLlmApi(target) {
+  const params = new URLSearchParams({
+    agentId: target.agentId,
+    path: target.path,
+    owner: target.owner,
+  });
+  return request(`/api/agents/llm-api?${params.toString()}`);
+}
+
+export function updateAgentLlmApi(config) {
+  return request("/api/agents/llm-api", {method: "POST", body: JSON.stringify(config)});
+}
+
 // target is {agentId, path, owner}, straight from a row of the agents table.
 export function patchAgent(target) {
   return request("/api/agents/patch", {method: "POST", body: JSON.stringify(target)});

@@ -26,6 +26,8 @@ func InitAPI() {
 	web.Router("/api/account", &controllers.ApiController{}, "GET:GetAccount")
 	web.Router("/api/host-info", &controllers.ApiController{}, "GET:GetHostInfo")
 	web.Router("/api/agents", &controllers.ApiController{}, "GET:GetAgents")
+	web.Router("/api/agents/llm-api", &controllers.ApiController{}, "GET:GetAgentLlmApi")
+	web.Router("/api/agents/llm-api", &controllers.ApiController{}, "POST:UpdateAgentLlmApi")
 	web.Router("/api/agents/patch", &controllers.ApiController{}, "POST:PatchAgent")
 	web.Router("/api/agents/unpatch", &controllers.ApiController{}, "POST:UnpatchAgent")
 	web.Router("/api/events", &controllers.ApiController{}, "GET:GetEvents")
