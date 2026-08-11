@@ -43,7 +43,21 @@ func (c *ApiController) UpdateSettings() {
 		return
 	}
 
-	if err := object.SaveSettings(&s); err != nil {
+	// MutateSettings serializes this validate -> merge -> persist sequence
+	// against every other settings update, including a concurrent
+	// /api/agents/llm-provider switch.
+	updated, err := object.MutateSettings(func(current *object.Settings) (*object.Settings, error) {
+		if err := current.LLM.ValidateProviderRemoval(s.LLM); err != nil {
+			return nil, err
+		}
+
+		// The client never receives an existing provider's API key, so one it
+		// posts back without a key is not asking to clear it - it just
+		// round-tripped what it was given.
+		s.LLM.PreserveApiKeys(current.LLM)
+		return &s, nil
+	})
+	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
@@ -52,5 +66,5 @@ func (c *ApiController) UpdateSettings() {
 	// the edit rather than wait for a restart.
 	auth.InitConfig()
 
-	c.ResponseOk(object.GetSettings())
+	c.ResponseOk(updated)
 }

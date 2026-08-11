@@ -25,6 +25,7 @@ import (
 
 	"github.com/casdoor/casdoor-aiguard/agenthook"
 	"github.com/casdoor/casdoor-aiguard/conf"
+	"github.com/casdoor/casdoor-aiguard/util"
 )
 
 const (
@@ -103,7 +104,7 @@ func updateClaudeCodeHooks(target Target, add bool) error {
 	if err != nil {
 		return err
 	}
-	config, mode, exists, err := readClaudeCodeConfig(configPath)
+	config, mode, exists, err := readJSONConfigFile(configPath)
 	if err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func updateClaudeCodeHooks(target Target, add bool) error {
 			return err
 		}
 	}
-	return writeClaudeCodeConfig(configPath, config, mode)
+	return writeJSONConfigFile(configPath, config, mode)
 }
 
 func claudeCodeHooksStatus(target Target) (bool, string, error) {
@@ -149,7 +150,7 @@ func claudeCodeHooksStatus(target Target) (bool, string, error) {
 	if err != nil {
 		return false, "", err
 	}
-	config, _, exists, err := readClaudeCodeConfig(configPath)
+	config, _, exists, err := readJSONConfigFile(configPath)
 	if err != nil {
 		return false, "", err
 	}
@@ -206,7 +207,12 @@ func claudeCodeHookClaims(config map[string]any) map[string]struct{} {
 	return claims
 }
 
-func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error) {
+// readJSONConfigFile reads a JSON object config file, reporting a missing
+// file as an empty object rather than an error so callers can create it, and
+// the file's pre-existing permission bits so writeJSONConfigFile can preserve
+// them. Nothing here is Claude-specific: Codex's auth.json is plain JSON too,
+// so codex_llm.go reuses this rather than duplicating it.
+func readJSONConfigFile(path string) (map[string]any, os.FileMode, bool, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return map[string]any{}, 0o600, false, nil
@@ -231,12 +237,12 @@ func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error
 	return config, info.Mode().Perm(), true, nil
 }
 
-func writeClaudeCodeConfig(path string, config map[string]any, mode os.FileMode) error {
+func writeJSONConfigFile(path string, config map[string]any, mode os.FileMode) error {
 	updated, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(updated, '\n'), mode)
+	return util.AtomicWriteFile(path, append(updated, '\n'), mode)
 }
 
 func installClaudeCodeHooks(config map[string]any, command string, arguments []string) (bool, error) {

@@ -66,6 +66,12 @@ export function unpatchAgent(target) {
   return request("/api/agents/unpatch", {method: "POST", body: JSON.stringify(target)});
 }
 
+// target is {agentId, path, owner}; providerId is a saved provider's id from
+// settings.llm.providers, or "" to switch back to the agent's own default.
+export function switchLLMProvider(target, providerId) {
+  return request("/api/agents/llm-provider", {method: "POST", body: JSON.stringify({...target, providerId})});
+}
+
 export function getRecords(agent = "", limit = 200, eventType = "", outcome = "", session = "") {
   const params = new URLSearchParams({agent, limit: String(limit), eventType, outcome, session});
   return request(`/api/records?${params.toString()}`);

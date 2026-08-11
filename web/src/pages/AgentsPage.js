@@ -13,10 +13,10 @@
 // limitations under the License.
 
 import React, {useEffect, useState} from "react";
-import {Alert, Button, Popconfirm, Space, Table, Tag, Tooltip, Typography, message} from "antd";
+import {Alert, Button, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message} from "antd";
 import {ReloadOutlined, RobotOutlined} from "@ant-design/icons";
 import {Link} from "react-router-dom";
-import {getAgents, patchAgent, unpatchAgent} from "../backend/api";
+import {getAgents, getSettings, patchAgent, switchLLMProvider, unpatchAgent} from "../backend/api";
 import {AgentIcon} from "./policySetUtil";
 
 const {Title, Text} = Typography;
@@ -25,21 +25,42 @@ const rowKey = (record) => `${record.owner}:${record.path}`;
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState([]);
+  const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // The key of the row whose patch is in flight, so only its button spins.
   const [busyKey, setBusyKey] = useState(null);
+  // The key of the row whose provider switch is in flight.
+  const [switchingKey, setSwitchingKey] = useState(null);
 
   const load = () => {
     setLoading(true);
     setError(null);
-    getAgents()
-      .then((data) => setAgents(data || []))
+    Promise.all([getAgents(), getSettings()])
+      .then(([agentsData, settings]) => {
+        setAgents(agentsData || []);
+        setProviders((settings && settings.llm && settings.llm.providers) || []);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
+
+  const changeProvider = (record, providerId) => {
+    const target = {agentId: record.agentId, path: record.path, owner: record.owner};
+    setSwitchingKey(rowKey(record));
+    switchLLMProvider(target, providerId)
+      .then((result) => {
+        message.success(providerId ? `Switched ${record.name} to the new provider` : `Switched ${record.name} back to its default`);
+        if (result && result.detail) {
+          message.info(result.detail);
+        }
+        load();
+      })
+      .catch((err) => message.error(err.message))
+      .finally(() => setSwitchingKey(null));
+  };
 
   const togglePatch = (record) => {
     const patched = record.patched;
@@ -111,6 +132,25 @@ export default function AgentsPage() {
     {title: "Records", key: "records", render: (_, record) => (
       record.patched ? <Link to={`/records?agent=${encodeURIComponent(record.agentId)}`}>View</Link> : null
     )},
+    {title: "LLM Provider", key: "llmProvider", render: (_, record) => {
+      if (!record.llmProviderSupported) {
+        return null;
+      }
+      return (
+        <Select
+          size="small"
+          style={{minWidth: 160}}
+          loading={switchingKey === rowKey(record)}
+          disabled={switchingKey === rowKey(record)}
+          value={record.activeLlmProviderId || ""}
+          onChange={(value) => changeProvider(record, value)}
+          options={[
+            {value: "", label: "System default"},
+            ...providers.map((provider) => ({value: provider.id, label: provider.name})),
+          ]}
+        />
+      );
+    }},
     {title: "Action", key: "action", render: renderAction},
   ];
 

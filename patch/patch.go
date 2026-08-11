@@ -25,6 +25,12 @@
 //
 // Adding an agent means writing one Patcher and registering it; nothing else in
 // aiguard needs to change.
+//
+// Some agents also get an LLMSwitcher, a separate and smaller contract in
+// llm_switch.go for pointing the agent at a chosen LLM provider by editing
+// the same kind of config file. It is deliberately not part of Patcher: it is
+// a routine, repeatable operation an operator does over and over, not
+// one-time instrumentation.
 package patch
 
 import (
