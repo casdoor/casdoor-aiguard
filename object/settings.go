@@ -331,14 +331,34 @@ var settingsUpdateMutex sync.Mutex
 // and returns the settings to persist. A non-nil error aborts without
 // persisting anything.
 func MutateSettings(build func(current *Settings) (*Settings, error)) (*Settings, error) {
+	return MutateSettingsWithUndo(func(current *Settings) (*Settings, func() error, error) {
+		next, err := build(current)
+		return next, nil, err
+	})
+}
+
+// MutateSettingsWithUndo is MutateSettings for a build that also changes state
+// outside settings.yaml - today an agent's own config file. The undo it
+// returns runs only if persisting the settings afterwards fails, so the world
+// cannot be left one step ahead of what settings.yaml records: an agent
+// pointed at a provider no Active entry mentions is invisible on the Agents
+// page and cannot be switched back off from there.
+//
+// A nil undo means there is nothing outside settings.yaml to put back.
+func MutateSettingsWithUndo(build func(current *Settings) (*Settings, func() error, error)) (*Settings, error) {
 	settingsUpdateMutex.Lock()
 	defer settingsUpdateMutex.Unlock()
 
-	next, err := build(GetSettings())
+	next, undo, err := build(GetSettings())
 	if err != nil {
 		return nil, err
 	}
 	if err := SaveSettings(next); err != nil {
+		if undo != nil {
+			if undoErr := undo(); undoErr != nil {
+				return nil, fmt.Errorf("save settings: %v; undoing the change they were meant to record also failed: %w", err, undoErr)
+			}
+		}
 		return nil, err
 	}
 	return next, nil

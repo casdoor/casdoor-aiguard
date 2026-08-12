@@ -195,37 +195,87 @@ func TestCodexLLMClearResetsApiKeyAuthEvenWhenHandSet(t *testing.T) {
 	}
 }
 
-func TestCodexLLMApplyRollsBackAuthOnConfigWriteFailure(t *testing.T) {
-	codexHome := t.TempDir()
-	t.Setenv("CODEX_HOME", codexHome)
-	target := codexTestTarget(t)
+// TestCodexLLMApplyLeavesAuthAloneWhenConfigCannotBeUsed pins the guarantee
+// the auth.json rollback exists for: a switch either lands in both files or in
+// neither. The new config.toml bytes are now produced before anything is
+// written, so an unreadable or unparseable config.toml fails here without
+// having touched auth.json at all; restoreFileState still covers the remaining
+// window, where only the write itself can fail.
+func TestCodexLLMApplyLeavesAuthAloneWhenConfigCannotBeUsed(t *testing.T) {
+	cases := map[string]func(t *testing.T, codexHome string){
+		"config.toml cannot be read": func(t *testing.T, codexHome string) {
+			if err := os.MkdirAll(filepath.Join(codexHome, "config.toml"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"config.toml cannot be parsed": func(t *testing.T, codexHome string) {
+			if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("model = \n[broken\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
 
-	authPath := filepath.Join(codexHome, "auth.json")
-	if err := os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"unrelated"}}`), 0o644); err != nil {
+	for name, breakConfig := range cases {
+		t.Run(name, func(t *testing.T) {
+			codexHome := t.TempDir()
+			t.Setenv("CODEX_HOME", codexHome)
+			target := codexTestTarget(t)
+
+			authPath := filepath.Join(codexHome, "auth.json")
+			before := []byte(`{"tokens":{"access_token":"unrelated"}}`)
+			if err := os.WriteFile(authPath, before, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			breakConfig(t, codexHome)
+
+			err := ApplyProvider(target, LLMProvider{BaseUrl: "https://api.example.com", ApiKey: "sk-new", Model: "gpt-5-codex"})
+			if err == nil {
+				t.Fatal("ApplyProvider should fail when config.toml cannot be used")
+			}
+
+			after, err := os.ReadFile(authPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Errorf("auth.json should be untouched when config.toml fails:\nbefore=%s\nafter=%s", before, after)
+			}
+		})
+	}
+}
+
+// TestCodexLLMRestoreFileStateUndoesAWrite covers restoreFileState directly:
+// the rollback updateCodexLLMConfig runs when the config.toml write itself
+// fails, which no portable test can provoke through the public API.
+func TestCodexLLMRestoreFileStateUndoesAWrite(t *testing.T) {
+	directory := t.TempDir()
+
+	existing := filepath.Join(directory, "auth.json")
+	original := []byte(`{"tokens":{"access_token":"unrelated"}}`)
+	if err := os.WriteFile(existing, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(authPath)
+	if err := os.WriteFile(existing, []byte(`{"OPENAI_API_KEY":"sk-half-applied"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoreFileState(existing, original, true, 0o600)
+	restored, err := os.ReadFile(existing)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if string(restored) != string(original) {
+		t.Errorf("restoreFileState left %s as %q, want %q", existing, restored, original)
+	}
 
-	// Make config.toml a directory so the write of config.toml is guaranteed
-	// to fail after auth.json has already been written.
-	if err := os.MkdirAll(filepath.Join(codexHome, "config.toml"), 0o755); err != nil {
+	// A file aiguard created has no earlier content to put back, so undoing
+	// the write means removing it.
+	created := filepath.Join(directory, "created.json")
+	if err := os.WriteFile(created, []byte(`{"OPENAI_API_KEY":"sk-half-applied"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	err = ApplyProvider(target, LLMProvider{BaseUrl: "https://api.example.com", ApiKey: "sk-new", Model: "gpt-5-codex"})
-	if err == nil {
-		t.Fatal("ApplyProvider should fail when config.toml cannot be written")
-	}
-
-	after, err := os.ReadFile(authPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Errorf("auth.json should be rolled back on config.toml write failure:\nbefore=%s\nafter=%s", before, after)
+	restoreFileState(created, nil, false, 0o600)
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Errorf("restoreFileState should remove a file that did not exist before, stat err = %v", err)
 	}
 }
 

@@ -217,6 +217,79 @@ func TestMutateSettingsSerializesConcurrentUpdates(t *testing.T) {
 	}
 }
 
+// TestMutateSettingsWithUndoRunsUndoWhenPersistFails covers the ordering
+// problem behind /api/agents/llm-provider: the agent's own config file is
+// written inside build, before settings.yaml records which provider that was.
+// If the persist fails, the undo has to put the agent back - otherwise its
+// live config points at a provider no Active entry mentions, which the Agents
+// page cannot show or switch off.
+func TestMutateSettingsWithUndoRunsUndoWhenPersistFails(t *testing.T) {
+	// A settings.yaml under a directory that does not exist cannot be written.
+	t.Setenv("policyFile", filepath.Join(t.TempDir(), "missing", "policy.yaml"))
+	t.Cleanup(func() { SetSettings(&Settings{}) })
+	SetSettings(&Settings{})
+
+	undone := false
+	_, err := MutateSettingsWithUndo(func(current *Settings) (*Settings, func() error, error) {
+		current.LLM.Active = append(current.LLM.Active, LLMActiveProvider{AgentId: "claude-code", ProviderId: "p1"})
+		return current, func() error {
+			undone = true
+			return nil
+		}, nil
+	})
+	if err == nil {
+		t.Fatal("MutateSettingsWithUndo should report a settings.yaml it cannot write")
+	}
+	if !undone {
+		t.Error("the undo should run when persisting the settings fails")
+	}
+	if active := GetSettings().LLM.ActiveProviderId("claude-code", "", ""); active != "" {
+		t.Errorf("a failed persist should not leave the change in memory, got %q", active)
+	}
+}
+
+// TestMutateSettingsWithUndoReportsAFailedUndo: when the undo also fails the
+// agent really is left ahead of settings.yaml, so the operator has to hear
+// about both halves rather than just the save error.
+func TestMutateSettingsWithUndoReportsAFailedUndo(t *testing.T) {
+	t.Setenv("policyFile", filepath.Join(t.TempDir(), "missing", "policy.yaml"))
+	t.Cleanup(func() { SetSettings(&Settings{}) })
+	SetSettings(&Settings{})
+
+	_, err := MutateSettingsWithUndo(func(current *Settings) (*Settings, func() error, error) {
+		return current, func() error { return fmt.Errorf("cannot reach the agent's config file") }, nil
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{"save settings", "cannot reach the agent's config file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
+// TestMutateSettingsWithUndoSkipsUndoOnSuccess keeps the undo strictly a
+// failure path: a switch that persists cleanly must not be walked back.
+func TestMutateSettingsWithUndoSkipsUndoOnSuccess(t *testing.T) {
+	t.Setenv("policyFile", filepath.Join(t.TempDir(), "policy.yaml"))
+	t.Cleanup(func() { SetSettings(&Settings{}) })
+	SetSettings(&Settings{})
+
+	undone := false
+	if _, err := MutateSettingsWithUndo(func(current *Settings) (*Settings, func() error, error) {
+		return current, func() error {
+			undone = true
+			return nil
+		}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if undone {
+		t.Error("the undo ran even though the settings persisted")
+	}
+}
+
 // TestGetSettingsNeverReturnsNilLLMSlices pins a regression in clone(): an
 // earlier version used append([]LLMProvider(nil), src...), and appending zero
 // elements onto a nil slice returns nil, reintroducing the JSON "null"

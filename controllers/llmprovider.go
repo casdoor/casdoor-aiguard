@@ -57,31 +57,21 @@ func (c *ApiController) SetLLMProvider() {
 		return
 	}
 
-	// MutateSettings holds its lock across the whole lookup -> write-the-config
-	// -> record-active sequence, so a concurrent switch cannot read the same
-	// starting settings and clobber this one's Active entry.
-	_, err := object.MutateSettings(func(settings *object.Settings) (*object.Settings, error) {
-		if req.ProviderId == "" {
-			if err := patch.ClearProvider(target); err != nil {
-				return nil, err
-			}
-		} else {
-			provider, found := settings.LLM.ProviderById(req.ProviderId)
-			if !found {
-				return nil, fmt.Errorf("unknown LLM provider %q", req.ProviderId)
-			}
-			if err := patch.ApplyProvider(target, patch.LLMProvider{
-				BaseUrl:        provider.BaseUrl,
-				ApiKey:         provider.ApiKey,
-				Model:          provider.Model,
-				SmallFastModel: provider.SmallFastModel,
-			}); err != nil {
-				return nil, err
-			}
+	// MutateSettingsWithUndo holds its lock across the whole lookup ->
+	// write-the-config -> record-active sequence, so a concurrent switch cannot
+	// read the same starting settings and clobber this one's Active entry. The
+	// undo puts the agent back on the provider it was already using if
+	// settings.yaml cannot be written, rather than leaving a live config file
+	// the Agents page has no record of.
+	_, err := object.MutateSettingsWithUndo(func(settings *object.Settings) (*object.Settings, func() error, error) {
+		previousId := settings.LLM.ActiveProviderId(target.AgentId, target.Path, target.Owner)
+		if err := switchToLLMProvider(settings, target, req.ProviderId); err != nil {
+			return nil, nil, err
 		}
+		undo := func() error { return switchToLLMProvider(settings, target, previousId) }
 
 		settings.LLM.SetActive(target.AgentId, target.Path, target.Owner, req.ProviderId)
-		return settings, nil
+		return settings, undo, nil
 	})
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -91,5 +81,25 @@ func (c *ApiController) SetLLMProvider() {
 	c.ResponseOk(llmProviderSwitchResponse{
 		ProviderId: req.ProviderId,
 		Detail:     "restart the agent to use this provider - it reads its config only at launch",
+	})
+}
+
+// switchToLLMProvider writes providerId's endpoint into target's own config,
+// or restores the agent's default when providerId is empty. Both directions go
+// through here so the undo path in SetLLMProvider is the same code as the
+// forward one.
+func switchToLLMProvider(settings *object.Settings, target patch.Target, providerId string) error {
+	if providerId == "" {
+		return patch.ClearProvider(target)
+	}
+	provider, found := settings.LLM.ProviderById(providerId)
+	if !found {
+		return fmt.Errorf("unknown LLM provider %q", providerId)
+	}
+	return patch.ApplyProvider(target, patch.LLMProvider{
+		BaseUrl:        provider.BaseUrl,
+		ApiKey:         provider.ApiKey,
+		Model:          provider.Model,
+		SmallFastModel: provider.SmallFastModel,
 	})
 }
