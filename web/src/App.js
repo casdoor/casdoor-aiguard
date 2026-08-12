@@ -14,7 +14,7 @@
 
 import React, {useCallback, useEffect, useState} from "react";
 import {Layout, Menu, Tag, Tooltip} from "antd";
-import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined, MessageOutlined, DesktopOutlined, IdcardOutlined, MergeCellsOutlined, BulbOutlined} from "@ant-design/icons";
+import {DashboardOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, ApiOutlined, FileTextOutlined, MessageOutlined, DesktopOutlined, IdcardOutlined, MergeCellsOutlined, BulbOutlined, CloudServerOutlined} from "@ant-design/icons";
 import {Link, Route, Switch, useLocation} from "react-router-dom";
 import DashboardPage from "./pages/DashboardPage";
 import PolicyHubPage from "./pages/PolicyHubPage";
@@ -26,6 +26,7 @@ import InterceptPage from "./pages/InterceptPage";
 import CasdoorSettingsPage from "./pages/CasdoorSettingsPage";
 import AgentsPage from "./pages/AgentsPage";
 import SessionsPage from "./pages/SessionsPage";
+import LLMProvidersPage from "./pages/LLMProvidersPage";
 import RecordsPage from "./pages/RecordsPage";
 import AccountArea from "./auth/AccountArea";
 import AuthCallback from "./auth/AuthCallback";
@@ -40,6 +41,7 @@ const menuItems = [
   {key: "/", icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link>},
   {key: "/agents", icon: <RobotOutlined />, label: <Link to="/agents">Agents</Link>},
   {key: "/sessions", icon: <MessageOutlined />, label: <Link to="/sessions">Sessions</Link>},
+  {key: "/llm-providers", icon: <CloudServerOutlined />, label: <Link to="/llm-providers">LLM Providers</Link>},
   {key: "/records", icon: <FileTextOutlined />, label: <Link to="/records">Records</Link>},
   {key: "/policyhub", icon: <SafetyCertificateOutlined />, label: <Link to="/policyhub">Policy Hub</Link>},
   {key: "/digital-employee", icon: <IdcardOutlined />, label: <Link to="/digital-employee">Digital Employee</Link>},
@@ -131,6 +133,7 @@ function App() {
                 <Route exact path="/" component={DashboardPage} />
                 <Route exact path="/agents" component={AgentsPage} />
                 <Route exact path="/sessions" component={SessionsPage} />
+                <Route exact path="/llm-providers" component={LLMProvidersPage} />
                 <Route exact path="/records" component={RecordsPage} />
                 <Route exact path="/policyhub" component={PolicyHubPage} />
                 <Route exact path="/policyhub/:name" component={PolicySetPage} />

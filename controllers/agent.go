@@ -18,14 +18,18 @@ import (
 	"encoding/json"
 
 	"github.com/casdoor/casdoor-aiguard/agent"
+	"github.com/casdoor/casdoor-aiguard/object"
 	"github.com/casdoor/casdoor-aiguard/patch"
 )
 
 // discoveredAgent is one row of the Web UI's agents table: what the scan found,
-// flattened together with whether that installation is currently patched.
+// flattened together with whether that installation is currently patched and
+// whether/what LLM provider it is switched to.
 type discoveredAgent struct {
 	agent.Installation
 	patch.Status
+	LlmProviderSupported bool   `json:"llmProviderSupported"`
+	ActiveLlmProviderId  string `json:"activeLlmProviderId,omitempty"`
 }
 
 // GetAgents
@@ -34,12 +38,15 @@ type discoveredAgent struct {
 // @router /agents [get]
 func (c *ApiController) GetAgents() {
 	installations := agent.Scan()
+	settings := object.GetSettings()
 
 	agents := make([]*discoveredAgent, 0, len(installations))
 	for _, installation := range installations {
 		agents = append(agents, &discoveredAgent{
-			Installation: installation,
-			Status:       patch.StatusOf(targetOf(installation)),
+			Installation:         installation,
+			Status:               patch.StatusOf(targetOf(installation)),
+			LlmProviderSupported: patch.LLMSwitchSupported(installation.AgentId),
+			ActiveLlmProviderId:  settings.LLM.ActiveProviderId(installation.AgentId, installation.Path, installation.Owner),
 		})
 	}
 	c.ResponseOk(agents)
