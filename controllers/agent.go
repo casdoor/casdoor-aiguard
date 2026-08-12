@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 
 	"github.com/casdoor/casdoor-aiguard/agent"
-	"github.com/casdoor/casdoor-aiguard/agentconfig"
 	"github.com/casdoor/casdoor-aiguard/patch"
 )
 
@@ -42,7 +41,7 @@ func (c *ApiController) GetAgents() {
 		agents = append(agents, &discoveredAgent{
 			Installation:    installation,
 			Status:          patch.StatusOf(targetOf(installation)),
-			ApiConfigurable: agentconfig.Supports(installation.AgentId),
+			ApiConfigurable: patch.SupportsLlmAPI(installation.AgentId),
 		})
 	}
 	c.ResponseOk(agents)

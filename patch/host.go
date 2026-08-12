@@ -17,9 +17,11 @@ package patch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,11 +46,47 @@ const (
 // lands.
 func homeOf(target Target) (string, error) {
 	if target.Owner != "" {
-		if account, err := user.Lookup(target.Owner); err == nil && account.HomeDir != "" {
+		if account, err := ownerAccount(target.Owner); err == nil && account.HomeDir != "" {
 			return account.HomeDir, nil
 		}
 	}
 	return os.UserHomeDir()
+}
+
+func codexHomeOf(target Target) (string, error) {
+	if isCurrentUser(target.Owner) {
+		if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
+			if !filepath.IsAbs(configured) {
+				return "", errors.New("CODEX_HOME must be an absolute path")
+			}
+			return filepath.Clean(configured), nil
+		}
+	}
+	home, err := homeOf(target)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+// ownerAccount accepts both the bare account names returned on Unix and the
+// DOMAIN\name form Windows process inspection commonly reports.
+func ownerAccount(owner string) (*user.User, error) {
+	if owner == "" {
+		return user.Current()
+	}
+	if current, err := user.Current(); err == nil && strings.EqualFold(baseAccount(current.Username), baseAccount(owner)) {
+		return current, nil
+	}
+	account, err := user.Lookup(owner)
+	if err == nil {
+		return account, nil
+	}
+	name := baseAccount(owner)
+	if name == owner {
+		return nil, err
+	}
+	return user.Lookup(name)
 }
 
 // isCurrentUser reports whether owner is the account aiguard itself runs as.

@@ -139,6 +139,14 @@ File-based patchers keep backups in `data/patches/`. Claude Code edits its share
 settings file in place and Unpatch removes only aiguard's current hook handlers,
 so other settings and hooks remain untouched.
 
+**Configure API** is available for Claude Code, ChatGPT Desktop's Codex mode and
+Codex CLI. Relay mode edits the selected owner's live agent configuration; the
+API never returns the saved key to the browser. The first relay save records the
+original files in `data/patches/`, and Official restores those exact files.
+Desktop Codex and Codex CLI share this state when they share `$CODEX_HOME`.
+Keep `data/patches/` while relay mode is active: deleting it also deletes the
+record needed to restore the pre-relay files.
+
 How an agent is instrumented is agent-specific, so each agent supplies its own
 patcher (`patch/`):
 
@@ -230,6 +238,11 @@ monitoring claim. It does not edit `$CODEX_HOME/config.toml`, configure OTel,
 or install a hook. Desktop and CLI may share one `$CODEX_HOME`; the rollout's
 explicit source selects an enabled claim, while IDE and unknown sources are
 ignored.
+
+This audit-only **Patch** action is separate from **Configure API**. Choosing
+relay mode there incrementally updates `auth.json` and only the active model
+keys plus `[model_providers.aiguard]` in `config.toml`; other tables, comments
+and formatting remain in place. Choosing Official restores the pre-relay files.
 
 The monitor tails `$CODEX_HOME/sessions/**/rollout-*.jsonl`. Existing files
 start at EOF on first Patch and offsets survive AIGuard restarts. Codex CLI
@@ -393,7 +406,7 @@ overridden by an environment variable of the same name):
 | `databaseFile` | `./data/aiguard.db` | local SQLite database backing records and events (Records, Sessions, dashboard) |
 | `auditLogFile` | `./logs/audit.log` | legacy append-only JSONL audit log; read once to import pre-upgrade events into `databaseFile`, no longer written to |
 | `recordLogFile` | `./logs/record.log` | legacy append-only JSONL record log; read once to import pre-upgrade records into `databaseFile`, no longer written to |
-| `patchStateDir` | `./data/patches` | patch manifests and file backups used by file-based patchers |
+| `patchStateDir` | `./data/patches` | manifests and file backups used to undo agent patches and API relay configuration |
 | `recordsIngestUrl` | *(empty)* | endpoint baked into installed hooks; set it when the agent runs in a container or WSL |
 | `casdoorEndpoint` | `http://localhost:8000` | Casdoor base URL |
 | `casdoorClientId` / `casdoorClientSecret` | *(empty)* | aiguard's own client credentials |
@@ -455,6 +468,9 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 - **A call no enabled policy set denies is allowed.** Enabling a set is what adds
   enforcement; nothing is blocked by accident.
 - **Step-up defaults to deny** while CIBA is stubbed (`stepUpDefaultAction = deny`).
+- **Agent API configuration is local or authenticated.** Loopback clients may
+  use Configure API without Casdoor; every non-loopback request must carry a
+  signed-in operator session. Forwarding headers cannot override the TCP peer.
 
 ## HTTP API
 
@@ -464,6 +480,7 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET /api/auth-config` · `POST /api/signin` · `POST /api/signout` · `GET /api/account` | optional Casdoor operator login |
 | `GET /api/agents` | AI agents installed on this host, with patch status |
 | `POST /api/agents/patch` · `POST /api/agents/unpatch` | instrument / restore one installation |
+| `GET,POST /api/agents/llm-api` | inspect or switch Claude Code / Codex API configuration (loopback or signed-in operator only; keys are never returned) |
 | `GET /api/records` · `POST /api/records` | behaviour records (read with optional `agent`, `eventType`, `outcome`, `session`; ingest one hook record) |
 | `POST /api/records/feedback` | correct a verdict — and learn a rule from it |
 | `GET /api/sessions` | records grouped by session, one summary row each, newest first |
@@ -475,6 +492,11 @@ This is a security-sensitive enforcement point, so the defaults are deliberate:
 | `GET,POST /api/policy` | interception policy file |
 | `GET,POST /api/settings` | settings (secrets masked) |
 | `GET /api/ca-cert` | download the local CA certificate (PEM) |
+
+Configure API's `GET` accepts `agentId`, `path` and `owner` query parameters
+and returns `{mode, baseUrl, model, hasApiKey}`. Its `POST` accepts those target
+fields plus `mode`, `baseUrl`, `model` and an optional `apiKey`; an empty key
+keeps the currently configured key.
 
 All responses use Casdoor's `{ "status": "ok", "msg": "", "data": ... }` envelope.
 

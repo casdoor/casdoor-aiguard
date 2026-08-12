@@ -148,6 +148,10 @@ func ResolveOpenAgentAuditDir(agentPath, owner string) (string, error) {
 	return filepath.Join(filepath.Dir(filepath.Clean(binary)), openAgentAuditSubdir), nil
 }
 
+func accountName(value string) string {
+	return filepath.Base(strings.ReplaceAll(strings.TrimSpace(value), `\`, "/"))
+}
+
 func EnableOpenAgentMonitor(path, owner, auditDir string) error {
 	return openAgentMonitor.enable(openAgentClaim{
 		Path: filepath.Clean(path), Owner: strings.TrimSpace(owner), AuditDir: filepath.Clean(auditDir),

@@ -16,8 +16,9 @@ package controllers
 
 import (
 	"encoding/json"
+	"net"
 
-	"github.com/casdoor/casdoor-aiguard/agentconfig"
+	"github.com/casdoor/casdoor-aiguard/patch"
 )
 
 // GetAgentLlmApi
@@ -25,7 +26,10 @@ import (
 // @Description read the active LLM API configuration for an agent installation without exposing its API key
 // @router /agents/llm-api [get]
 func (c *ApiController) GetAgentLlmApi() {
-	config, err := agentconfig.Get(agentconfig.Target{
+	if !c.allowLlmAPIConfig() {
+		return
+	}
+	config, err := patch.GetLlmAPI(patch.Target{
 		AgentId: c.Ctx.Input.Query("agentId"),
 		Path:    c.Ctx.Input.Query("path"),
 		Owner:   c.Ctx.Input.Query("owner"),
@@ -42,16 +46,42 @@ func (c *ApiController) GetAgentLlmApi() {
 // @Description switch an agent installation between its official and relay LLM API configuration
 // @router /agents/llm-api [post]
 func (c *ApiController) UpdateAgentLlmApi() {
-	var update agentconfig.Update
+	if !c.allowLlmAPIConfig() {
+		return
+	}
+	var update patch.LlmAPIUpdate
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &update); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
 
-	config, err := agentconfig.Set(update)
+	config, err := patch.SetLlmAPI(update)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
 	c.ResponseOk(config)
+}
+
+// allowLlmAPIConfig keeps local, no-Casdoor setups usable while requiring a
+// signed-in operator for requests arriving over the network. RemoteAddr is the
+// TCP peer and deliberately cannot be overridden by forwarding headers.
+func (c *ApiController) allowLlmAPIConfig() bool {
+	if c.GetSessionClaims() != nil {
+		return true
+	}
+	if isLoopbackPeer(c.Ctx.Request.RemoteAddr) {
+		return true
+	}
+	c.ResponseError("please sign in to configure agent APIs from a remote host")
+	return false
+}
+
+func isLoopbackPeer(remoteAddress string) bool {
+	host, _, err := net.SplitHostPort(remoteAddress)
+	if err != nil {
+		return false
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback()
 }

@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -120,49 +119,6 @@ func (m *codexMonitorManager) stopMonitor() {
 		close(stop)
 		<-done
 	}
-}
-
-// ResolveCodexHome uses a custom CODEX_HOME only for the current process user.
-// Other discovered profiles use their own default ~/.codex directory.
-func ResolveCodexHome(agentPath, owner string) (string, error) {
-	owner = strings.TrimSpace(owner)
-	current, _ := user.Current()
-	if current != nil && strings.EqualFold(accountName(owner), accountName(current.Username)) {
-		if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
-			if !filepath.IsAbs(configured) {
-				return "", errors.New("CODEX_HOME must be an absolute path")
-			}
-			return filepath.Clean(configured), nil
-		}
-		if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
-			return filepath.Join(home, ".codex"), nil
-		}
-	}
-
-	candidates := []string{owner}
-	if index := strings.LastIndexAny(owner, `\/`); index >= 0 && index+1 < len(owner) {
-		candidates = append(candidates, owner[index+1:])
-	}
-	for _, candidate := range candidates {
-		account, err := user.Lookup(candidate)
-		if err == nil && filepath.IsAbs(account.HomeDir) {
-			return filepath.Join(account.HomeDir, ".codex"), nil
-		}
-	}
-
-	normalized := strings.ReplaceAll(filepath.Clean(agentPath), `\`, "/")
-	lower := strings.ToLower(normalized)
-	if index := strings.Index(lower, "/users/"); index >= 0 {
-		remainder := normalized[index+len("/users/"):]
-		if slash := strings.Index(remainder, "/"); slash > 0 {
-			return filepath.Clean(normalized[:index+len("/users/")+slash] + "/.codex"), nil
-		}
-	}
-	return "", fmt.Errorf("cannot resolve a home directory for owner %q", owner)
-}
-
-func accountName(value string) string {
-	return filepath.Base(strings.ReplaceAll(strings.TrimSpace(value), `\`, "/"))
 }
 
 func EnableCodexMonitor(agentID, path, owner, codexHome string) error {

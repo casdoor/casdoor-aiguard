@@ -136,10 +136,10 @@ func (c *ChangeSet) WriteFile(path string, data []byte, perm os.FileMode) error 
 		return err
 	}
 
+	c.manifest.Changes = append(c.manifest.Changes, record)
 	if err := os.WriteFile(path, data, perm); err != nil {
 		return err
 	}
-	c.manifest.Changes = append(c.manifest.Changes, record)
 	return nil
 }
 
@@ -199,15 +199,59 @@ func Apply(target Target, apply func(*ChangeSet) error) error {
 		backupDir: backupDir(target),
 	}
 	if err := apply(changes); err != nil {
-		rollback(changes.manifest, changes.backupDir)
+		rollbackErr := rollback(changes.manifest, changes.backupDir)
+		if rollbackErr != nil {
+			recoveryErr := saveManifest(target, changes.manifest)
+			if recoveryErr != nil {
+				return fmt.Errorf("apply patch: %v; rollback failed: %v; keep recovery backup %s: %w", err, rollbackErr, changes.backupDir, recoveryErr)
+			}
+			return fmt.Errorf("apply patch: %v; rollback failed (recovery state retained): %w", err, rollbackErr)
+		}
+		_ = os.RemoveAll(changes.backupDir)
 		return err
 	}
 	if err := saveManifest(target, changes.manifest); err != nil {
 		rollbackErr := rollback(changes.manifest, changes.backupDir)
 		_ = os.Remove(manifestPath(target))
-		_ = os.RemoveAll(changes.backupDir)
 		if rollbackErr != nil {
-			return fmt.Errorf("save patch state: %v; rollback failed: %w", err, rollbackErr)
+			return fmt.Errorf("save patch state: %v; rollback failed (recovery backup retained at %s): %w", err, changes.backupDir, rollbackErr)
+		}
+		_ = os.RemoveAll(changes.backupDir)
+		return err
+	}
+	return nil
+}
+
+// edit applies a short-lived transaction to files that already have a durable
+// Apply journal. Its backups exist only for this request: success discards
+// them, while any later write or ownership failure restores the request's
+// starting state without replacing the original journal used by Revert.
+func edit(target Target, apply func(*ChangeSet) error) error {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+		return err
+	}
+	backups, err := os.MkdirTemp(stateDir(), ".edit-")
+	if err != nil {
+		return err
+	}
+	removeBackups := true
+	defer func() {
+		if removeBackups {
+			_ = os.RemoveAll(backups)
+		}
+	}()
+
+	changes := &ChangeSet{
+		manifest:  &manifest{AgentId: target.AgentId, Target: target, PatchedAt: time.Now()},
+		backupDir: backups,
+	}
+	if err := apply(changes); err != nil {
+		if rollbackErr := rollback(changes.manifest, changes.backupDir); rollbackErr != nil {
+			removeBackups = false
+			return fmt.Errorf("edit files: %v; rollback failed (recovery backup retained at %s): %w", err, backups, rollbackErr)
 		}
 		return err
 	}
@@ -269,7 +313,14 @@ func rollback(saved *manifest, backups string) error {
 			}
 			var content []byte
 			if content, err = os.ReadFile(filepath.Join(backups, item.Backup)); err == nil {
-				err = os.WriteFile(item.Path, content, item.Mode)
+				// A managed file may originally have been read-only. Make it
+				// writable long enough to restore its bytes, then put its exact
+				// original mode back.
+				if chmodErr := os.Chmod(item.Path, item.Mode|0o200); chmodErr != nil && !os.IsNotExist(chmodErr) {
+					err = chmodErr
+					break
+				}
+				err = os.WriteFile(item.Path, content, item.Mode|0o200)
 				if err == nil {
 					err = os.Chmod(item.Path, item.Mode)
 				}

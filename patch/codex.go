@@ -46,7 +46,7 @@ func (p codexRolloutPatcher) PatchNotice(patched bool) (string, string) {
 }
 
 func (p codexRolloutPatcher) Patch(target Target) error {
-	codexHome, err := agentmonitor.ResolveCodexHome(target.Path, target.Owner)
+	codexHome, err := codexHomeOf(target)
 	if err != nil {
 		return err
 	}

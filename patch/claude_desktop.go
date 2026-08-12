@@ -65,11 +65,11 @@ func (p claudeDesktopPatcher) Patch(target Target) error {
 		}
 		childObject(config, "mcpServers")[claudeDesktopServerName] = entry
 
-		updated, err := json.MarshalIndent(config, "", "  ")
+		updated, err := marshalJSONObject(config)
 		if err != nil {
 			return err
 		}
-		return changes.WriteFile(configPath, append(updated, '\n'), 0o600)
+		return changes.WriteFile(configPath, updated, 0o600)
 	}); err != nil || runtime.GOOS != "windows" {
 		return err
 	}
@@ -105,9 +105,9 @@ func (p claudeDesktopPatcher) Status(target Target) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return Status{}, fmt.Errorf("cannot parse %s: %w", configPath, err)
+	config, err := decodeJSONObject(data, configPath)
+	if err != nil {
+		return Status{}, err
 	}
 
 	if _, ok := lookupObject(config, "mcpServers", claudeDesktopServerName); !ok {
@@ -182,6 +182,10 @@ func readJSONObject(changes *ChangeSet, path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeJSONObject(data, path)
+}
+
+func decodeJSONObject(data []byte, path string) (map[string]any, error) {
 	config := map[string]any{}
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return config, nil
@@ -189,5 +193,16 @@ func readJSONObject(changes *ChangeSet, path string) (map[string]any, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("cannot parse %s: %w", path, err)
 	}
+	if config == nil {
+		return nil, fmt.Errorf("cannot parse %s: root must be a JSON object", path)
+	}
 	return config, nil
+}
+
+func marshalJSONObject(config map[string]any) ([]byte, error) {
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(updated, '\n'), nil
 }

@@ -15,7 +15,6 @@
 package patch
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,7 +102,7 @@ func updateClaudeCodeHooks(target Target, add bool) error {
 	if err != nil {
 		return err
 	}
-	config, mode, exists, err := readClaudeCodeConfig(configPath)
+	config, mode, exists, err := readJSONConfigFile(configPath)
 	if err != nil {
 		return err
 	}
@@ -141,7 +140,7 @@ func updateClaudeCodeHooks(target Target, add bool) error {
 			return err
 		}
 	}
-	return writeClaudeCodeConfig(configPath, config, mode)
+	return writeJSONConfigFile(configPath, config, mode)
 }
 
 func claudeCodeHooksStatus(target Target) (bool, string, error) {
@@ -149,7 +148,7 @@ func claudeCodeHooksStatus(target Target) (bool, string, error) {
 	if err != nil {
 		return false, "", err
 	}
-	config, _, exists, err := readClaudeCodeConfig(configPath)
+	config, _, exists, err := readJSONConfigFile(configPath)
 	if err != nil {
 		return false, "", err
 	}
@@ -206,7 +205,7 @@ func claudeCodeHookClaims(config map[string]any) map[string]struct{} {
 	return claims
 }
 
-func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error) {
+func readJSONConfigFile(path string) (map[string]any, os.FileMode, bool, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return map[string]any{}, 0o600, false, nil
@@ -218,25 +217,19 @@ func readClaudeCodeConfig(path string) (map[string]any, os.FileMode, bool, error
 	if err != nil {
 		return nil, 0, false, err
 	}
-	config := map[string]any{}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return config, info.Mode().Perm(), true, nil
-	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, 0, false, fmt.Errorf("cannot parse %s: %w", path, err)
-	}
-	if config == nil {
-		return nil, 0, false, fmt.Errorf("cannot parse %s: root must be a JSON object", path)
+	config, err := decodeJSONObject(data, path)
+	if err != nil {
+		return nil, 0, false, err
 	}
 	return config, info.Mode().Perm(), true, nil
 }
 
-func writeClaudeCodeConfig(path string, config map[string]any, mode os.FileMode) error {
-	updated, err := json.MarshalIndent(config, "", "  ")
+func writeJSONConfigFile(path string, config map[string]any, mode os.FileMode) error {
+	updated, err := marshalJSONObject(config)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(updated, '\n'), mode)
+	return os.WriteFile(path, updated, mode)
 }
 
 func installClaudeCodeHooks(config map[string]any, command string, arguments []string) (bool, error) {

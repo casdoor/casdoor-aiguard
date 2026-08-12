@@ -18,7 +18,6 @@ package patch
 
 import (
 	"os"
-	"os/user"
 	"strconv"
 )
 
@@ -29,13 +28,7 @@ type fileOwnership struct {
 }
 
 func ownershipForOwner(owner string) (fileOwnership, error) {
-	var account *user.User
-	var err error
-	if owner == "" {
-		account, err = user.Current()
-	} else {
-		account, err = user.Lookup(owner)
-	}
+	account, err := ownerAccount(owner)
 	if err != nil {
 		return fileOwnership{}, err
 	}
